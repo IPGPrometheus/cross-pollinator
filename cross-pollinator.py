@@ -67,7 +67,7 @@ TRACKER_MAPPING = {
 }
 
 # Success decisions that indicate torrent was found
-SUCCESS_DECISIONS = ['MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL']
+SUCCESS_DECISIONS = ['MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS']
 
 def normalize_tracker_name(raw_name):
     """Normalize tracker names to standard abbreviations."""
@@ -113,50 +113,73 @@ def get_all_configured_trackers():
         print(f"Error getting configured trackers: {e}")
         return []
 
-def get_latest_torrent_status():
+def get_latest_torrent_status(debug=False):
     """
-    Get the latest status for each unique torrent (by info_hash).
-    Uses the most recent database entry per info_hash to avoid duplicates.
+    Get unique torrents by name and aggregate all found trackers across all info_hashes.
+    This handles cases where the same torrent appears with different info_hashes.
     """
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get unique torrents by info_hash with their latest name
+        # Get all torrents and group by name
         cursor.execute("""
-            SELECT cs.info_hash, cs.name
-            FROM client_searchee cs
-            INNER JOIN (
-                SELECT info_hash, MAX(id) as max_id
-                FROM client_searchee
-                GROUP BY info_hash
-            ) latest ON cs.info_hash = latest.info_hash AND cs.id = latest.max_id
-            ORDER BY cs.name
+            SELECT name, info_hash
+            FROM client_searchee
+            ORDER BY name
         """)
         
-        torrents = {}
+        # Group by torrent name, collecting all info_hashes
+        name_to_hashes = defaultdict(set)
         for row in cursor.fetchall():
-            info_hash, name = row
-            torrents[info_hash] = {
-                'name': name,
-                'found_trackers': set()
+            name, info_hash = row
+            name_to_hashes[name].add(info_hash)
+        
+        torrents = {}
+        for name, info_hashes in name_to_hashes.items():
+            torrents[name] = {
+                'info_hashes': info_hashes,
+                'found_trackers': set(),
+                'debug_info': defaultdict(list) if debug else None
             }
         
-        # Get all successful matches for these torrents
+        # Get the LATEST decision for each tracker/info_hash combination
         cursor.execute("""
-            SELECT DISTINCT cs.info_hash, d.guid
+            SELECT cs.info_hash, d.guid, d.decision, d.last_seen, cs.name
             FROM client_searchee cs
             JOIN decision d ON cs.info_hash = d.info_hash
-            WHERE d.decision IN (?, ?, ?)
-        """, SUCCESS_DECISIONS)
+            WHERE d.last_seen = (
+                SELECT MAX(d2.last_seen)
+                FROM decision d2
+                WHERE d2.info_hash = d.info_hash 
+                AND d2.guid = d.guid
+            )
+            ORDER BY cs.name, d.guid
+        """)
         
+        # Map latest decisions back to torrent names
         for row in cursor.fetchall():
-            info_hash, guid = row
-            if info_hash in torrents:
-                tracker_name = guid.split('.')[0] if '.' in guid else guid
-                normalized = normalize_tracker_name(tracker_name)
-                if normalized:  # Only track mapped trackers
-                    torrents[info_hash]['found_trackers'].add(normalized)
+            info_hash, guid, decision, last_seen, torrent_name = row
+            tracker_name = guid.split('.')[0] if '.' in guid else guid
+            normalized = normalize_tracker_name(tracker_name)
+            if not normalized:
+                continue
+                
+            # Find which torrent name this info_hash belongs to
+            for name, torrent_info in torrents.items():
+                if info_hash in torrent_info['info_hashes']:
+                    if debug:
+                        torrent_info['debug_info'][normalized].append({
+                            'info_hash': info_hash,
+                            'decision': decision,
+                            'last_seen': last_seen,
+                            'guid': guid
+                        })
+                    
+                    # Only count as found if latest decision was successful
+                    if decision in SUCCESS_DECISIONS:
+                        torrent_info['found_trackers'].add(normalized)
+                    break
         
         conn.close()
         return torrents
@@ -165,30 +188,31 @@ def get_latest_torrent_status():
         print(f"Error getting torrent status: {e}")
         return {}
 
-def analyze_missing_trackers():
+def analyze_missing_trackers(debug=False):
     """Analyze which trackers each torrent is missing from."""
     all_trackers = get_all_configured_trackers()
     if not all_trackers:
         print("❌ No configured trackers found")
         return [], []
     
-    torrents = get_latest_torrent_status()
+    torrents = get_latest_torrent_status(debug)
     if not torrents:
         print("❌ No torrents found in database")
         return [], []
     
     results = []
-    for info_hash, torrent_info in torrents.items():
+    for name, torrent_info in torrents.items():
         found_trackers = torrent_info['found_trackers']
         missing_trackers = sorted(set(all_trackers) - found_trackers)
         
         # Only include if missing from at least one tracker
         if missing_trackers:
             results.append({
-                'name': torrent_info['name'],
-                'info_hash': info_hash,
+                'name': name,
+                'info_hashes': torrent_info['info_hashes'],
                 'found_trackers': sorted(found_trackers),
-                'missing_trackers': missing_trackers
+                'missing_trackers': missing_trackers,
+                'debug_info': torrent_info.get('debug_info')
             })
     
     return results, all_trackers
@@ -201,7 +225,21 @@ def print_banner():
 ║              Cross-seed Missing Tracker Analyzer                  ║
 ╚═══════════════════════════════════════════════════════════════════╝""")
 
-def print_results(results, all_trackers):
+def print_debug_info(item):
+    """Print detailed debug information for a torrent."""
+    print(f"\n🔍 DEBUG: {item['name']}")
+    print(f"   Found on: {', '.join(item['found_trackers']) if item['found_trackers'] else 'None'}")
+    print(f"   Missing from: {', '.join(item['missing_trackers'])}")
+    print(f"   Info hashes: {len(item['info_hashes'])} unique")
+    
+    if item['debug_info']:
+        for tracker, decisions in item['debug_info'].items():
+            status = "✅ FOUND" if tracker in item['found_trackers'] else "❌ MISSING"
+            print(f"   {status} {tracker}:")
+            for decision in decisions:
+                print(f"     - {decision['decision']} (hash: {decision['info_hash'][:8]}...)")
+
+def print_results(results, all_trackers, debug=False):
     """Print analysis results - only missing trackers."""
     print_banner()
     
@@ -212,14 +250,23 @@ def print_results(results, all_trackers):
     
     print(f"📊 Found {len(results)} unique torrents missing from trackers")
     print(f"🎯 Configured trackers: {', '.join(all_trackers)}")
-    print("\n🔍 MISSING TRACKER REPORT:")
-    print("=" * 100)
     
-    for item in sorted(results, key=lambda x: x['name'].lower()):
-        missing_list = ", ".join(item['missing_trackers'])
-        print(f"{item['name']} | missing from | {missing_list}")
+    if debug:
+        print("\n🐛 DEBUG MODE - Showing first 5 entries with decision details:")
+        print("=" * 100)
+        for item in sorted(results, key=lambda x: x['name'].lower())[:5]:
+            print_debug_info(item)
+        print("=" * 100)
+    else:
+        print("\n🔍 MISSING TRACKER REPORT:")
+        print("=" * 100)
+        
+        for item in sorted(results, key=lambda x: x['name'].lower()):
+            missing_list = ", ".join(item['missing_trackers'])
+            print(f"{item['name']} | missing from | {missing_list}")
+        
+        print("=" * 100)
     
-    print("=" * 100)
     print(f"📈 Total files needing upload: {len(results)}")
 
 def print_detailed_stats(results, all_trackers):
@@ -248,6 +295,7 @@ def main():
     )
     parser.add_argument('--run', action='store_true', help='Run analysis')
     parser.add_argument('--stats', action='store_true', help='Show detailed statistics')
+    parser.add_argument('--debug', action='store_true', help='Show debug information for decision tree')
     
     args = parser.parse_args()
     
@@ -260,9 +308,9 @@ def main():
         sys.exit(1)
     
     print("🔍 Analyzing cross-seed database for missing trackers...")
-    results, all_trackers = analyze_missing_trackers()
+    results, all_trackers = analyze_missing_trackers(args.debug)
     
-    print_results(results, all_trackers)
+    print_results(results, all_trackers, args.debug)
     
     if args.stats:
         print_detailed_stats(results, all_trackers)
