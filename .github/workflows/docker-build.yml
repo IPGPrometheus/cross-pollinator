@@ -1,0 +1,24 @@
+name: Docker Build Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: docker build -t cross-pollinator:test .
+    
+    - name: Test container creation
+      run: |
+        docker run --rm -d --name test-container cross-pollinator:test
+        sleep 5
+        docker exec test-container cross-pollinator --help || true
+        docker stop test-container

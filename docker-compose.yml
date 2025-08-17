@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  cross-pollinator:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: cross-pollinator:latest
+    container_name: cross-pollinator
+    volumes:
+      - ./config:/config:ro
+      - ${CROSS_SEED_DIR:-/mnt/user/appdata/cross-seed}:/cross-seed:ro
+    environment:
+      - TZ=${TZ:-America/New_York}
+    restart: unless-stopped
