@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+# Install system packages
+RUN apt-get update && apt-get install -y \
+    bash \
+    sqlite3 \
+    mediainfo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN pip install pymediainfo torf
+
+# Set working directory
+WORKDIR /app
+
+# Copy application files
+COPY . /app/
+
+# Make Python script executable
+RUN chmod +x /app/cross-pollinator.py
+
+# Create cross-pollinator command
+RUN echo '#!/bin/bash\npython3 /app/cross-pollinator.py "$@"' > /usr/local/bin/cross-pollinator && \
+    chmod +x /usr/local/bin/cross-pollinator
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\necho "Cross-Pollinator ready!"\necho "Usage: cross-pollinator --run [--stats]"\ntail -f /dev/null' > /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
