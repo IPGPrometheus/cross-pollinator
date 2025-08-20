@@ -19,16 +19,6 @@ THIS MEANS FOLLOWING ALL THE RULES PRESENT ON THE SITES YOU UPLOAD TO.
 - **🐳 Docker Ready**: Full Docker setup for easy deployment
 - **📊 Statistics**: Detailed upload statistics per tracker
 
-## Quick Start
-
-```bash
-cd /mnt/user/appdata or to the desired installation location. 
-git clone https://github.com/yourusername/cross-pollinator.git
-cd cross-pollinator
-./setup.sh
-./run.sh
-```
-
 ## Sample Output
 
 ```
