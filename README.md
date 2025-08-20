@@ -4,12 +4,11 @@ Cross-seed Missing Tracker Analyzer - Identifies torrents missing from specific 
 
 ## What It Does
 
-Cross-Pollinator analyzes your cross-seed database to find torrents that are **missing** from specific trackers. It shows you which files need to be uploaded to which trackers to maximize your cross-seeding coverage.
+Cross-Pollinator analyzes your cross-seed database to find torrents that are **missing** from specific trackers.
 
 ### Key Features
 
-- **🎯 Missing Focus**: Only shows torrents missing from trackers (not ones already found)
-- **🔄 Duplicate Handling**: Shows each torrent only once using latest database status
+- **🎯 Missing Focus**: Only shows torrents missing from trackers (not ones already found.
 - **🏷️ Tracker Normalization**: Clean tracker abbreviations (FL, BLU, AITHER, etc.)
 - **🔍 Database Analysis**: Direct SQLite database analysis for accurate results
 - **🐳 Docker Ready**: Full Docker setup for easy deployment
