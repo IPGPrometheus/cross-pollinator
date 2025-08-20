@@ -68,8 +68,7 @@ python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay 
 ## Usage
 1. **Run Analysis**
    ```
-   Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number     or -tmdb
-   movie/number or -tvdb number
+   Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number     or -tmdb movie/number or -tvdb number
 
    options:
      -h, --help         show this help message and exit
