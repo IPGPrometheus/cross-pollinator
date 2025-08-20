@@ -12,10 +12,9 @@ services:
     environment:
       - TZ=${TZ:-America/New_York}
     networks:
-      - yournetwork ### change this 
-    entrypoint: tail
+      - yourcontainernetwork ### Change this
     restart: unless-stopped
 
 networks:
-  homeprox: ### change this 
+  "yourcontainernetwork":   ### Change this
     external: true
