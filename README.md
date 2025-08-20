@@ -119,17 +119,17 @@ Create config/config.json in the container dir for tracker-specific validation r
 ```
 {
   "TRACKERS": {
-    "BLU": {
+    "FL": {
       "min_file_size_mb": 100,
       "allowed_codecs": ["x264", "x265", "H.264", "HEVC"],
       "forbidden_filename_patterns": ["cam", "ts", "tc"]
     },
-    "PTP": {
+    "TL": {
       "min_file_size_mb": 50,
       "forbidden_filename_patterns": ["cam", "ts", "tc", "r5"],
       "min_duration_minutes": 60
     },
-    "HDB": {
+    "WhateverTrackerName": {
       "min_file_size_mb": 200,
       "allowed_resolutions": ["720p", "1080p", "2160p"]
     }
