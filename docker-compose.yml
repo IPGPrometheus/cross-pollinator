@@ -11,4 +11,11 @@ services:
       - ./logs:/logs
     environment:
       - TZ=${TZ:-America/New_York}
+    networks:
+      - yournetwork ### change this 
+    entrypoint: tail
     restart: unless-stopped
+
+networks:
+  homeprox: ### change this 
+    external: true
