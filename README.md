@@ -48,7 +48,8 @@ python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay 
    git clone https://github.com/IPGPrometheus/cross-pollinator.git
    cd cross-pollinator
 
-   docker build -t cross-pollinator
+   docker-compose build cross-pollinator
+   docker-compose up -d cross-pollinator 
     OR 
    using https://forums.unraid.net/topic/114415-plugin-docker-compose-manager/ 
      available on the App Store. 
@@ -80,8 +81,12 @@ python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay 
 
 ### Manual run
 
+```console
+cross-pollinator.py --run [options]
 ```
-python3 cross-pollinator.py --run [options]
+
+```Command Line
+docker exec -it cross-pollinator cross-pollinator.py --run [options]
 ```
 
 ## Configuration
@@ -104,6 +109,32 @@ TRACKER_MAPPING = {
     'NEWTRACKER': ['NEWTRACKER', 'newtracker-domain'],
     # ... existing mappings
 }
+```
+
+### Config File 
+
+Create config/config.json in the container dir for tracker-specific validation rules.
+
+```json
+{
+  "TRACKERS": {
+    "BLU": {
+      "min_file_size_mb": 100,
+      "allowed_codecs": ["x264", "x265", "H.264", "HEVC"],
+      "forbidden_filename_patterns": ["cam", "ts", "tc"]
+    },
+    "PTP": {
+      "min_file_size_mb": 50,
+      "forbidden_filename_patterns": ["cam", "ts", "tc", "r5"],
+      "min_duration_minutes": 60
+    },
+    "HDB": {
+      "min_file_size_mb": 200,
+      "allowed_resolutions": ["720p", "1080p", "2160p"]
+    }
+  }
+}
+
 ```
 
 ## How It Works
