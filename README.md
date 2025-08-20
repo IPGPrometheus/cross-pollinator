@@ -80,13 +80,13 @@ python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay 
      --output-clean     Generate clean output with only upload commands. Add after --output
    ```
 
-### Manual run
 
-```console
+### Console run
+```
 cross-pollinator.py --run [options]
 ```
-
-```Command Line
+### Command Line run
+```
 docker exec -it cross-pollinator cross-pollinator.py --run [options]
 ```
 
@@ -116,7 +116,7 @@ TRACKER_MAPPING = {
 
 Create config/config.json in the container dir for tracker-specific validation rules.
 
-```json
+```
 {
   "TRACKERS": {
     "BLU": {
