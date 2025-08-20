@@ -1,7 +1,7 @@
 services:
   cross-pollinator:
-    build: 
-      context: .
+    build:
+      context: https://github.com/IPGPrometheus/cross-pollinator.git#main
       dockerfile: Dockerfile
     image: cross-pollinator:latest
     container_name: cross-pollinator
