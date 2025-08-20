@@ -22,6 +22,7 @@ THIS MEANS FOLLOWING ALL THE RULES PRESENT ON THE SITES YOU UPLOAD TO.
 ## Quick Start
 
 ```bash
+cd /mnt/user/appdata or to the desired installation location. 
 git clone https://github.com/yourusername/cross-pollinator.git
 cd cross-pollinator
 ./setup.sh
