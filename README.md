@@ -5,11 +5,16 @@ Cross-seed Missing Tracker Analyzer - Identifies torrents missing from specific 
 ## What It Does
 
 Cross-Pollinator analyzes your cross-seed database to find torrents that are **missing** from specific trackers.
+This creates a nice, simple list with the CLI for UploadAssistant.
+
+It does not validate your uploads, it does not validate your files. 
+
+YOU, AND ONLY YOU, ARE RESPONSIBLE FOR FOLLOWING THE RULES OF THE TRACKERS YOU ARE ON. 
+THIS MEANS FOLLOWING ALL THE RULES PRESENT ON THE SITES YOU UPLOAD TO. 
 
 ### Key Features
 
 - **🎯 Missing Focus**: Only shows torrents missing from trackers (not ones already found.
-- **🏷️ Tracker Normalization**: Clean tracker abbreviations (FL, BLU, AITHER, etc.)
 - **🔍 Database Analysis**: Direct SQLite database analysis for accurate results
 - **🐳 Docker Ready**: Full Docker setup for easy deployment
 - **📊 Statistics**: Detailed upload statistics per tracker
@@ -26,18 +31,15 @@ cd cross-pollinator
 ## Sample Output
 
 ```
-Cross-Pollinator: Missing Tracker Analyzer
-==========================================
-📊 Found 2 unique torrents missing from trackers
-🎯 Configured trackers: AITHER, BLU, FL, HUNO, LST, OE, OTW
+# Cross-Pollinator: Generated date time
+# Total files needing upload: 617
+ Note this is a build line for existing torrents on trackers. 
+ If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number 
+# 10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv
+# Missing from: FL
+# Found on: TL
+python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv" --trackers FL,TL
 
-🔍 MISSING TRACKER REPORT:
-================================================================================
-Wonder.2017.1080p.UHD.BluRay.DDP.7.1.HDR.x265.D-Z0N3.mkv | missing from | BLU, HUNO, LST
-Movie.2024.2160p.WEB.H265-SLOT.mkv | missing from | AITHER, FL, OTW
-================================================================================
-📈 Total files needing upload: 2
-```
 
 ## Installation & Usage
 
