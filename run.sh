@@ -7,9 +7,9 @@ if [[ "$1" == "--stats" ]]; then
 fi
 
 if ! docker image inspect cross-pollinator:latest >/dev/null 2>&1; then
-    echo "🔨 Building image..."
+    echo "Building image..."
     ./build.sh
 fi
 
-echo "🚀 Running Cross-Pollinator analysis..."
+echo "Running Cross-Pollinator analysis..."
 docker-compose run --rm cross-pollinator --run $STATS_FLAG
