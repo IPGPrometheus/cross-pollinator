@@ -39,7 +39,7 @@ cd cross-pollinator
 # Missing from: FL
 # Found on: TL
 python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv" --trackers FL,TL
-
+```
 
 ## Installation
 1. **install with Docker Compose**
