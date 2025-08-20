@@ -41,30 +41,48 @@ cd cross-pollinator
 python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv" --trackers FL,TL
 
 
-## Installation & Usage
+## Installation
+1. **install with Docker Compose**
+   ```
+   cd /mnt/user/appdata or to the desired installation location. 
+   git clone https://github.com/IPGPrometheus/cross-pollinator.git
+   cd cross-pollinator
 
-### Docker (Recommended)
+   docker build -t cross-pollinator
+    OR 
+   using https://forums.unraid.net/topic/114415-plugin-docker-compose-manager/ 
+     available on the App Store. 
 
-1. **Initial Setup**
-   ```bash
-   ./setup.sh
+   cd /mnt/user/appdata or to the desired installation location.  
+   git clone https://github.com/IPGPrometheus/cross-pollinator.git
+
+   Head over to the Docker tab - go to Compose at the bottom. Add New Stack
+   Click Advanced, then set the stack directory as the installation location. 
+   Name the stack. Click okay.
+   Click the gear icon next to the name, then edit stack - edit compose file. Make sure that the docker compose shows up. 
+   Close / Click Cancel. 
+
+   Compose up 
    ```
 
-2. **Run Analysis**
-   ```bash
-   ./run.sh                    # Basic analysis
-   ./run.sh --stats           # With detailed statistics
+## Usage
+1. **Run Analysis**
+   ```
+   Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number     or -tmdb
+   movie/number or -tvdb number
+
+   options:
+     -h, --help         show this help message and exit
+     --run              Run analysis and show missing torrents
+     --output [OUTPUT]  Generate upload commands file (optional filename)
+     --no-emoji         Remove all emojis from output
+     --output-clean     Generate clean output with only upload commands. Add after --output
    ```
 
-3. **Manual Build** (if needed)
-   ```bash
-   ./build.sh                 # Build Docker image
-   ```
+### Manual run
 
-### Manual Installation
-
-```bash
-python3 cross-pollinator.py --run --stats
+```
+python3 cross-pollinator.py --run [options]
 ```
 
 ## Configuration
