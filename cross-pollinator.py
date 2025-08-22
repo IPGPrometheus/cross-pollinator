@@ -114,7 +114,12 @@ def get_torrents_with_paths():
         cursor = conn.cursor()
         
         # Get all configured trackers from our mapping
-        all_trackers = sorted(TRACKER_MAPPING.keys())
+        available_trackers = set()
+        trackers_str = str(trackers_text).lower() if trackers_text else ""
+
+        for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
+            if any(variant.lower() in trackers_str for variant in tracker_variants):
+                available_trackers.add(tracker_abbrev)
         if not all_trackers:
             return []
         
@@ -175,7 +180,7 @@ def get_torrents_with_paths():
                             unmatched_trackers.append(domain)
             
             # Calculate missing trackers
-            missing_trackers = sorted(set(all_trackers) - found_trackers)
+            missing_trackers = sorted(available_trackers - found_trackers)
             
             # Only include torrents that are missing from some trackers
             if missing_trackers:
