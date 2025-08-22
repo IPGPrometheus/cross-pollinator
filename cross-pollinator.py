@@ -113,16 +113,6 @@ def get_torrents_with_paths():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get all configured trackers from our mapping
-        available_trackers = set()
-        trackers_str = str(trackers_text).lower() if trackers_text else ""
-
-        for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
-            if any(variant.lower() in trackers_str for variant in tracker_variants):
-                available_trackers.add(tracker_abbrev)
-        if not all_trackers:
-            return []
-        
         print("📊 Getting torrents with paths and performing tracker string search...")
         start_time = time.time()
         
@@ -140,6 +130,51 @@ def get_torrents_with_paths():
         print(f"Processing {total_torrents} torrents with direct string search...")
         
         results = []
+        
+        for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
+            # Only process video files
+            if not is_video_file(name):
+                continue
+
+            # Convert trackers column to string
+            trackers_str = str(trackers_text).lower() if trackers_text else ""
+
+            # Build the set of trackers that are actually available for this torrent
+            available_trackers = set()
+            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
+                if any(variant.lower() in trackers_str for variant in tracker_variants):
+                    available_trackers.add(tracker_abbrev)
+
+            found_trackers = set()
+            unmatched_trackers = []
+
+            # Check which trackers were actually found
+            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
+                if any(variant.lower() in trackers_str for variant in tracker_variants):
+                    found_trackers.add(tracker_abbrev)
+
+            # Calculate missing trackers only from available set
+            missing_trackers = sorted(available_trackers - found_trackers)
+
+            if missing_trackers:
+                results.append({
+                    'name': name,
+                    'path': save_path,
+                    'missing_trackers': missing_trackers,
+                    'found_trackers': sorted(found_trackers) or ["None"]
+                })
+
+            # Show progress every 25 items or at the end
+            if i % 25 == 0 or i == total_torrents:
+                show_progress_bar(i, total_torrents, start_time)
+        
+        conn.close()
+        return results
+
+    except Exception as e:
+        print(f"Error getting torrents with paths: {e}")
+        return []
+
         
         for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
             # Only process video files
