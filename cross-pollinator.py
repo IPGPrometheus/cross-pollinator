@@ -139,7 +139,7 @@ def get_torrents_with_paths():
         print("📊 Getting torrents with paths and performing tracker string search...")
         start_time = time.time()
 
-        # Build the GLOBAL configured tracker set from the DB (only trackers present in client_searchee.trackers)
+        # Build the GLOBAL configured tracker set from the DB
         configured_trackers = get_configured_trackers(cursor)
         if not configured_trackers:
             print("No configured trackers detected in the DB (client_searchee.trackers).")
@@ -158,47 +158,39 @@ def get_torrents_with_paths():
 
         print(f"Processing {total_torrents} torrents with direct string search...")
 
-        results = []
+        # Group by torrent name
+        grouped = defaultdict(lambda: {
+            "paths": set(),
+            "found_trackers": set(),
+        })
 
         for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
-            # Only process video files
             if not is_video_file(name):
                 continue
 
-            # Found = trackers listed for THIS torrent row
-            found_trackers = extract_abbrevs_from_text(trackers_text)
+            # Track one path per torrent (just keep them all for safety)
+            grouped[name]["paths"].add(save_path)
 
-            # Missing = only among globally configured trackers (seen anywhere in DB), not all mapping
-            missing_trackers = sorted(configured_trackers - found_trackers)
-
-            # Optionally collect unmatched domains for display (kept from your original intent)
-            unmatched_trackers = []
-            if trackers_text:
-                import re
-                trackers_str = str(trackers_text).lower()
-                domains = re.findall(r'[\w.-]+\.[\w.-]+', trackers_str)
-                for domain in domains:
-                    # skip if any mapped variant covers it
-                    if any(any(v.lower() in domain for v in variants) for variants in TRACKER_MAPPING.values()):
-                        continue
-                    if domain not in unmatched_trackers:
-                        unmatched_trackers.append(domain)
-
-            if missing_trackers:
-                found_display = sorted(found_trackers)
-                if unmatched_trackers:
-                    found_display.extend(sorted(unmatched_trackers))
-
-                results.append({
-                    'name': name,
-                    'path': save_path,
-                    'missing_trackers': missing_trackers,
-                    'found_trackers': found_display
-                })
+            # Track all found trackers across rows
+            found_here = extract_abbrevs_from_text(trackers_text)
+            grouped[name]["found_trackers"].update(found_here)
 
             # Progress bar
             if i % 25 == 0 or i == total_torrents:
                 show_progress_bar(i, total_torrents, start_time)
+
+        results = []
+        for name, data in grouped.items():
+            found_trackers = data["found_trackers"]
+            missing_trackers = sorted(configured_trackers - found_trackers)
+
+            if missing_trackers:
+                results.append({
+                    "name": name,
+                    "path": next(iter(data["paths"])),  # pick first available path
+                    "missing_trackers": missing_trackers,
+                    "found_trackers": sorted(found_trackers),
+                })
 
         conn.close()
         return results
@@ -206,6 +198,7 @@ def get_torrents_with_paths():
     except Exception as e:
         print(f"Error getting torrents with paths: {e}")
         return []
+
 
 def generate_upload_commands(results, output_file=None, clean_output=False):
     """Generate upload.py commands and save them to persistent appdata."""
