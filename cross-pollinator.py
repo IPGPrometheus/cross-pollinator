@@ -102,13 +102,16 @@ def normalize_tracker_name(raw_name):
         if name.startswith('FileList-'):
             return 'FL'
         
-        # Extract domain from full URLs (e.g., www.torrentleech.org -> torrentleech)
+        # Extract domain from full URLs (e.g., www.torrentleech.org -> torrentleech, hawke.uno -> hawke)
         if '.' in name and '/' not in name:
             # This is likely a domain name
             domain_parts = name.split('.')
             if len(domain_parts) >= 2:
-                # Extract the main domain part (e.g., torrentleech from www.torrentleech.org)
-                main_domain = domain_parts[-2] if domain_parts[0] == 'www' else domain_parts[0]
+                # Extract the main domain part (e.g., torrentleech from www.torrentleech.org, hawke from hawke.uno)
+                if domain_parts[0] == 'www':
+                    main_domain = domain_parts[1]  # Skip 'www' prefix
+                else:
+                    main_domain = domain_parts[0]  # Take first part (e.g., hawke from hawke.uno)
                 name = main_domain
         
         # Check for exact matches and substring matches
@@ -187,12 +190,12 @@ def get_torrents_with_paths():
         if not all_trackers:
             return []
         
-        print("📊 Getting torrents with paths...")
+        print("📊 Getting torrents with paths and tracker info...")
         start_time = time.time()
         
-        # Get torrents with paths
+        # Get torrents with paths and trackers column
         cursor.execute("""
-            SELECT name, info_hash, save_path
+            SELECT name, info_hash, save_path, trackers
             FROM client_searchee
             WHERE save_path IS NOT NULL AND save_path != ''
             ORDER BY name
@@ -204,57 +207,35 @@ def get_torrents_with_paths():
         name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set(), 'found_domains': set()})
         
         print(f"Processing {total_torrents} torrents...")
-        for i, (name, info_hash, save_path) in enumerate(torrents_data, 1):
+        for i, (name, info_hash, save_path, trackers_json) in enumerate(torrents_data, 1):
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
+            
+            # Parse trackers JSON and normalize tracker names
+            if trackers_json:
+                try:
+                    import json
+                    trackers_list = json.loads(trackers_json)
+                    for tracker in trackers_list:
+                        normalized = normalize_tracker_name(tracker)
+                        if normalized and normalized != 'Unknown':
+                            name_to_info[name]['found_trackers'].add(normalized)
+                        else:
+                            # Keep original tracker name if we can't normalize it
+                            name_to_info[name]['found_domains'].add(tracker)
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"Error parsing trackers JSON for {name}: {e}")
+                    # Fallback: treat as plain string if it's not JSON
+                    if isinstance(trackers_json, str) and trackers_json.strip():
+                        normalized = normalize_tracker_name(trackers_json.strip())
+                        if normalized and normalized != 'Unknown':
+                            name_to_info[name]['found_trackers'].add(normalized)
+                        else:
+                            name_to_info[name]['found_domains'].add(trackers_json.strip())
             
             # Show progress every 10 items or on the last item
             if i % 10 == 0 or i == total_torrents:
                 show_progress_bar(i, total_torrents, start_time)
-        
-        print("📋 Getting decisions from database...")
-        decision_start_time = time.time()
-        
-        # Get latest decisions for each tracker/info_hash
-        cursor.execute("""
-            SELECT cs.info_hash, d.guid, d.decision, cs.name
-            FROM client_searchee cs
-            JOIN decision d ON cs.info_hash = d.info_hash
-            WHERE d.last_seen = (
-                SELECT MAX(d2.last_seen)
-                FROM decision d2
-                WHERE d2.info_hash = d.info_hash 
-                AND d2.guid = d.guid
-            )
-        """)
-        
-        decisions_data = cursor.fetchall()
-        total_decisions = len(decisions_data)
-        
-        print(f"Processing {total_decisions} decisions...")
-        # Map decisions to torrents
-        for i, (info_hash, guid, decision, torrent_name) in enumerate(decisions_data, 1):
-            # Extract domain from guid
-            domain = None
-            if '://' in guid and '/' in guid:
-                domain = guid.split('://')[1].split('/')[0]
-                normalized = normalize_tracker_name(domain)
-            else:
-                # Fallback for non-URL guids
-                normalized = normalize_tracker_name(guid)
-                
-            for name, info in name_to_info.items():
-                if info_hash in info['info_hashes']:
-                    if decision in SUCCESS_DECISIONS:
-                        if normalized and normalized != 'Unknown':
-                            info['found_trackers'].add(normalized)
-                        elif domain:
-                            info['found_domains'].add(domain)
-                    break
-            
-            # Show progress every 50 items or on the last item
-            if i % 50 == 0 or i == total_decisions:
-                show_progress_bar(i, total_decisions, decision_start_time)
         
         print("🎬 Filtering video files and building results...")
         filter_start_time = time.time()
