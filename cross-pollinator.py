@@ -86,7 +86,7 @@ def normalize_tracker_name(raw_name):
     
     if name.startswith('https://'):
         name = name[8:]
-    if name.endswith(' (api)'):
+    if name.endswith(' (API)'):
         name = name[:-6]
     if name.startswith('FileList-'):
         return 'FL'
@@ -109,7 +109,6 @@ def get_all_configured_trackers():
         
         for row in cursor.fetchall():
             guid = row[0]
-            tracker_name = guid.split('://')[1].split('/')[0]
             normalized = normalize_tracker_name(tracker_name)
             if normalized:
                 trackers.add(normalized)
