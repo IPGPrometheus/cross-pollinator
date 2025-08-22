@@ -80,20 +80,23 @@ def is_video_file(filename):
     }
     return Path(filename).suffix.lower() in video_extensions
 
-def find_tracker_in_guid(guid):
-    """Find a known tracker name anywhere within the GUID string."""
-    if not guid:
-        return None
+def normalize_tracker_name(raw_name):
+    """Normalize tracker names to standard abbreviations."""
+    name = raw_name.lower().strip()
     
-    guid_lower = guid.lower()
+    if name.startswith('https://'):
+        name = name[8:]
+    if name.endswith(' (api)'):
+        name = name[:-6]
+    if name.startswith('FileList-'):
+        return 'FL'
     
-    # Search through all tracker mappings
     for abbrev, variants in TRACKER_MAPPING.items():
-        for variant in variants:
-            if variant.lower() in guid_lower:
+        for variants in variants:
+            if variants.lower() in name:
                 return abbrev
     
-    return None
+    return 'Unknown'
 
 def get_all_configured_trackers():
     """Get all configured trackers from database decisions."""
@@ -106,7 +109,8 @@ def get_all_configured_trackers():
         
         for row in cursor.fetchall():
             guid = row[0]
-            normalized = find_tracker_in_guid(guid)
+            tracker_name = guid.split('://')[1].split('/')[0]
+            normalized = normalize_tracker_name(tracker_name)
             if normalized:
                 trackers.add(normalized)
         
@@ -136,10 +140,10 @@ def get_torrents_with_paths():
         """)
         
         name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set()})
-        # Map decisions to torrents
         for row in cursor.fetchall():
-            info_hash, guid, decision, torrent_name = row
-            normalized = find_tracker_in_guid(guid)
+            name, info_hash, save_path = row
+            name_to_info[name]['info_hashes'].add(info_hash)
+            name_to_info[name]['paths'].add(save_path)
         
         # Get latest decisions for each tracker/info_hash
         cursor.execute("""
