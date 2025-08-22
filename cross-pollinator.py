@@ -107,15 +107,45 @@ def show_progress_bar(current, total, start_time, bar_length=50):
     if current == total:
         print()
 
+def extract_abbrevs_from_text(text: str) -> set:
+    """Return set of tracker abbreviations whose variants appear in given text."""
+    if not text:
+        return set()
+    s = str(text).lower()
+    found = set()
+    for abbrev, variants in TRACKER_MAPPING.items():
+        if any(v.lower() in s for v in variants):
+            found.add(abbrev)
+    return found
+
+def get_configured_trackers(cursor) -> set:
+    """
+    Scan the entire client_searchee.trackers column and build the global set
+    of trackers that actually exist in this DB (to avoid returning trackers
+    you don't have in UA).
+    """
+    configured = set()
+    cursor.execute("SELECT trackers FROM client_searchee")
+    for (trackers_text,) in cursor.fetchall():
+        configured |= extract_abbrevs_from_text(trackers_text)
+    return configured
+
 def get_torrents_with_paths():
     """Get torrents with their file paths and missing trackers using direct string search."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
+
         print("📊 Getting torrents with paths and performing tracker string search...")
         start_time = time.time()
-        
+
+        # Build the GLOBAL configured tracker set from the DB (only trackers present in client_searchee.trackers)
+        configured_trackers = get_configured_trackers(cursor)
+        if not configured_trackers:
+            print("No configured trackers detected in the DB (client_searchee.trackers).")
+            conn.close()
+            return []
+
         # Get torrents with paths and trackers column
         cursor.execute("""
             SELECT name, info_hash, save_path, trackers
@@ -123,121 +153,56 @@ def get_torrents_with_paths():
             WHERE save_path IS NOT NULL AND save_path != ''
             ORDER BY name
         """)
-        
         torrents_data = cursor.fetchall()
         total_torrents = len(torrents_data)
-        
+
         print(f"Processing {total_torrents} torrents with direct string search...")
-        
+
         results = []
-        
+
         for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
             # Only process video files
             if not is_video_file(name):
                 continue
 
-            # Convert trackers column to string
-            trackers_str = str(trackers_text).lower() if trackers_text else ""
+            # Found = trackers listed for THIS torrent row
+            found_trackers = extract_abbrevs_from_text(trackers_text)
 
-            # Build the set of trackers that are actually available for this torrent
-            available_trackers = set()
-            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
-                if any(variant.lower() in trackers_str for variant in tracker_variants):
-                    available_trackers.add(tracker_abbrev)
+            # Missing = only among globally configured trackers (seen anywhere in DB), not all mapping
+            missing_trackers = sorted(configured_trackers - found_trackers)
 
-            found_trackers = set()
+            # Optionally collect unmatched domains for display (kept from your original intent)
             unmatched_trackers = []
-
-            # Check which trackers were actually found
-            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
-                if any(variant.lower() in trackers_str for variant in tracker_variants):
-                    found_trackers.add(tracker_abbrev)
-
-            # Calculate missing trackers only from available set
-            missing_trackers = sorted(available_trackers - found_trackers)
+            if trackers_text:
+                import re
+                trackers_str = str(trackers_text).lower()
+                domains = re.findall(r'[\w.-]+\.[\w.-]+', trackers_str)
+                for domain in domains:
+                    # skip if any mapped variant covers it
+                    if any(any(v.lower() in domain for v in variants) for variants in TRACKER_MAPPING.values()):
+                        continue
+                    if domain not in unmatched_trackers:
+                        unmatched_trackers.append(domain)
 
             if missing_trackers:
-                results.append({
-                    'name': name,
-                    'path': save_path,
-                    'missing_trackers': missing_trackers,
-                    'found_trackers': sorted(found_trackers) or ["None"]
-                })
-
-            # Show progress every 25 items or at the end
-            if i % 25 == 0 or i == total_torrents:
-                show_progress_bar(i, total_torrents, start_time)
-        
-        conn.close()
-        return results
-
-    except Exception as e:
-        print(f"Error getting torrents with paths: {e}")
-        return []
-
-        
-        for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
-            # Only process video files
-            if not is_video_file(name):
-                continue
-            
-            found_trackers = set()
-            unmatched_trackers = []
-            
-            # Convert trackers to string for searching (handle None case)
-            trackers_str = str(trackers_text).lower() if trackers_text else ""
-            
-            # Check each tracker abbreviation against the trackers string
-            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
-                tracker_found = False
-                
-                # Check if any variant of this tracker is in the trackers string
-                for variant in tracker_variants:
-                    if variant.lower() in trackers_str:
-                        found_trackers.add(tracker_abbrev)
-                        tracker_found = True
-                        break
-                
-                # If no variant matched, collect unmatched tracker names for display
-                if not tracker_found and trackers_str and trackers_str != "none":
-                    # Extract individual tracker names from the JSON-like string for display
-                    import re
-                    # Find all domain-like strings in the trackers text
-                    domains = re.findall(r'[\w.-]+\.[\w.-]+', trackers_str)
-                    for domain in domains:
-                        # Only add if it's not already covered by our mapping
-                        domain_matched = False
-                        for check_abbrev, check_variants in TRACKER_MAPPING.items():
-                            if any(variant.lower() in domain.lower() for variant in check_variants):
-                                domain_matched = True
-                                break
-                        if not domain_matched and domain not in unmatched_trackers:
-                            unmatched_trackers.append(domain)
-            
-            # Calculate missing trackers
-            missing_trackers = sorted(available_trackers - found_trackers)
-            
-            # Only include torrents that are missing from some trackers
-            if missing_trackers:
-                # Create display list of found trackers
                 found_display = sorted(found_trackers)
                 if unmatched_trackers:
                     found_display.extend(sorted(unmatched_trackers))
-                
+
                 results.append({
                     'name': name,
                     'path': save_path,
                     'missing_trackers': missing_trackers,
                     'found_trackers': found_display
                 })
-            
-            # Show progress every 25 items or on the last item
+
+            # Progress bar
             if i % 25 == 0 or i == total_torrents:
                 show_progress_bar(i, total_torrents, start_time)
-        
+
         conn.close()
         return results
-        
+
     except Exception as e:
         print(f"Error getting torrents with paths: {e}")
         return []
