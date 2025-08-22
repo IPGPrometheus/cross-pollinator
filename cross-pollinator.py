@@ -31,6 +31,7 @@ TRACKER_MAPPING = {
     'BHDTV': ['BHDTV', 'bit-hdtv'],
     'BLU': ['BLU', 'blutopia'],
     'CBR': ['CBR', 'capybarabr'],
+    'CRT': ['CRT', 'cathode-ray.tube'],
     'DP': ['DP', 'darkpeers'],
     'FL': ['FL', 'filelist', 'FileList'],
     'FNP': ['FNP', 'fearnopeer'],
