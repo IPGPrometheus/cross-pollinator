@@ -82,20 +82,21 @@ def is_video_file(filename):
 
 def normalize_tracker_name(raw_name):
     """Normalize tracker names to standard abbreviations."""
-    name = raw_name.strip()
+    name = raw_name.lower().strip()
     
     if name.startswith('https://'):
         name = name[8:]
-    if name.endswith(' (API)'):
+    if name.endswith(' (api)'):
         name = name[:-6]
     if name.startswith('FileList-'):
         return 'FL'
     
     for abbrev, variants in TRACKER_MAPPING.items():
-        if name in variants or name.lower() in [v.lower() for v in variants]:
-            return abbrev
+        for variants in variants:
+            if variants.lower() in name:
+                return abbrev
     
-    return None
+    return 'Unknown'
 
 def get_all_configured_trackers():
     """Get all configured trackers from database decisions."""
