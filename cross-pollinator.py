@@ -82,105 +82,6 @@ def is_video_file(filename):
     }
     return Path(filename).suffix.lower() in video_extensions
 
-def normalize_tracker_name(raw_name):
-    """Normalize tracker names to standard abbreviations."""
-    try:
-        name = raw_name.lower().strip()
-        
-        # Handle URL format
-        if name.startswith('https://'):
-            name = name[8:]
-        elif name.startswith('http://'):
-            name = name[7:]
-        elif name.startswith('udp://'):
-            name = name[6:]
-        elif name.startswith('tracker://'):
-            name = name[10:]
-            
-        # Remove API suffix
-        if name.endswith(' (API)'):
-            name = name[:-6]
-        
-        # Remove announce paths and parameters
-        if '/announce' in name:
-            name = name.split('/announce')[0]
-        if '?' in name:
-            name = name.split('?')[0]
-        if ':' in name and not name.startswith('tracker.'):
-            # Handle port numbers, but keep tracker. prefix
-            name = name.split(':')[0]
-            
-        # Special handling for FileList
-        if name.startswith('FileList-'):
-            return 'FL'
-        
-        # Check for exact matches first
-        for abbrev, variants in TRACKER_MAPPING.items():
-            for variant in variants:
-                if variant.lower() == name:
-                    return abbrev
-        
-        # Extract domain from full URLs for further processing
-        if '.' in name and '/' not in name:
-            # This is likely a domain name
-            domain_parts = name.split('.')
-            if len(domain_parts) >= 2:
-                # Handle special tracker domain patterns
-                if name.startswith('tracker.'):
-                    # For tracker.torrentleech.org -> torrentleech
-                    main_domain = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
-                elif name.startswith('reactor.'):
-                    # For reactor.filelist.io -> filelist
-                    main_domain = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
-                elif domain_parts[0] == 'www':
-                    # For www.torrentleech.org -> torrentleech
-                    main_domain = domain_parts[1]
-                else:
-                    # For hawke.uno -> hawke
-                    main_domain = domain_parts[0]
-                
-                # Check if the extracted main domain matches any variants
-                for abbrev, variants in TRACKER_MAPPING.items():
-                    for variant in variants:
-                        if variant.lower() == main_domain:
-                            return abbrev
-        
-        # Final check for substring matches (but be more specific)
-        for abbrev, variants in TRACKER_MAPPING.items():
-            for variant in variants:
-                if len(variant) > 3 and variant.lower() in name:
-                    return abbrev
-        
-        return 'Unknown'
-    except Exception as e:
-        print(f"Error normalizing tracker name '{raw_name}': {e}")
-        return 'Unknown'
-
-def get_all_configured_trackers():
-    """Get all configured trackers from database decisions."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL")
-        trackers = set()
-        
-        for row in cursor.fetchall():
-            guid = row[0]
-            # Add safety check for guid format
-            if '://' in guid and '/' in guid:
-                tracker_name = guid.split('://')[1].split('/')[0]
-                normalized = normalize_tracker_name(tracker_name)
-                if normalized and normalized != 'Unknown':
-                    trackers.add(normalized)
-        
-        conn.close()
-        return sorted(trackers)
-        
-    except Exception as e:
-        print(f"Error getting configured trackers: {e}")
-        return []
-
 def show_progress_bar(current, total, start_time, bar_length=50):
     """Display a simple progress bar with time estimates."""
     if total == 0:
@@ -206,16 +107,17 @@ def show_progress_bar(current, total, start_time, bar_length=50):
         print()
 
 def get_torrents_with_paths():
-    """Get torrents with their file paths and missing trackers."""
+    """Get torrents with their file paths and missing trackers using direct string search."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        all_trackers = get_all_configured_trackers()
+        # Get all configured trackers from our mapping
+        all_trackers = sorted(TRACKER_MAPPING.keys())
         if not all_trackers:
             return []
         
-        print("📊 Getting torrents with paths and tracker info...")
+        print("📊 Getting torrents with paths and performing tracker string search...")
         start_time = time.time()
         
         # Get torrents with paths and trackers column
@@ -229,72 +131,68 @@ def get_torrents_with_paths():
         torrents_data = cursor.fetchall()
         total_torrents = len(torrents_data)
         
-        name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set(), 'found_domains': set()})
+        print(f"Processing {total_torrents} torrents with direct string search...")
         
-        print(f"Processing {total_torrents} torrents...")
-        for i, (name, info_hash, save_path, trackers_json) in enumerate(torrents_data, 1):
-            name_to_info[name]['info_hashes'].add(info_hash)
-            name_to_info[name]['paths'].add(save_path)
-            
-            # Parse trackers JSON and normalize tracker names
-            if trackers_json:
-                try:
-                    import json
-                    trackers_list = json.loads(trackers_json)
-                    for tracker in trackers_list:
-                        normalized = normalize_tracker_name(tracker)
-                        if normalized and normalized != 'Unknown':
-                            name_to_info[name]['found_trackers'].add(normalized)
-                        else:
-                            # Keep original tracker name if we can't normalize it
-                            name_to_info[name]['found_domains'].add(tracker)
-                except (json.JSONDecodeError, TypeError) as e:
-                    print(f"Error parsing trackers JSON for {name}: {e}")
-                    # Fallback: treat as plain string if it's not JSON
-                    if isinstance(trackers_json, str) and trackers_json.strip():
-                        normalized = normalize_tracker_name(trackers_json.strip())
-                        if normalized and normalized != 'Unknown':
-                            name_to_info[name]['found_trackers'].add(normalized)
-                        else:
-                            name_to_info[name]['found_domains'].add(trackers_json.strip())
-            
-            # Show progress every 10 items or on the last item
-            if i % 10 == 0 or i == total_torrents:
-                show_progress_bar(i, total_torrents, start_time)
-        
-        print("🎬 Filtering video files and building results...")
-        filter_start_time = time.time()
-        
-        # Build results with missing trackers (filter for video files only)
         results = []
-        items_to_process = list(name_to_info.items())
-        total_items = len(items_to_process)
         
-        for i, (name, info) in enumerate(items_to_process, 1):
-            # Only include video files
+        for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
+            # Only process video files
             if not is_video_file(name):
                 continue
+            
+            found_trackers = set()
+            unmatched_trackers = []
+            
+            # Convert trackers to string for searching (handle None case)
+            trackers_str = str(trackers_text).lower() if trackers_text else ""
+            
+            # Check each tracker abbreviation against the trackers string
+            for tracker_abbrev, tracker_variants in TRACKER_MAPPING.items():
+                tracker_found = False
                 
-            missing_trackers = sorted(set(all_trackers) - info['found_trackers'])
-            if missing_trackers and info['paths']:
-                # Use the first available path
-                file_path = list(info['paths'])[0]
+                # Check if any variant of this tracker is in the trackers string
+                for variant in tracker_variants:
+                    if variant.lower() in trackers_str:
+                        found_trackers.add(tracker_abbrev)
+                        tracker_found = True
+                        break
                 
-                # Combine found trackers and domains for display
-                found_display = sorted(info['found_trackers'])
-                if info['found_domains']:
-                    found_display.extend(sorted(info['found_domains']))
+                # If no variant matched, collect unmatched tracker names for display
+                if not tracker_found and trackers_str and trackers_str != "none":
+                    # Extract individual tracker names from the JSON-like string for display
+                    import re
+                    # Find all domain-like strings in the trackers text
+                    domains = re.findall(r'[\w.-]+\.[\w.-]+', trackers_str)
+                    for domain in domains:
+                        # Only add if it's not already covered by our mapping
+                        domain_matched = False
+                        for check_abbrev, check_variants in TRACKER_MAPPING.items():
+                            if any(variant.lower() in domain.lower() for variant in check_variants):
+                                domain_matched = True
+                                break
+                        if not domain_matched and domain not in unmatched_trackers:
+                            unmatched_trackers.append(domain)
+            
+            # Calculate missing trackers
+            missing_trackers = sorted(set(all_trackers) - found_trackers)
+            
+            # Only include torrents that are missing from some trackers
+            if missing_trackers:
+                # Create display list of found trackers
+                found_display = sorted(found_trackers)
+                if unmatched_trackers:
+                    found_display.extend(sorted(unmatched_trackers))
                 
                 results.append({
                     'name': name,
-                    'path': file_path,
+                    'path': save_path,
                     'missing_trackers': missing_trackers,
                     'found_trackers': found_display
                 })
             
             # Show progress every 25 items or on the last item
-            if i % 25 == 0 or i == total_items:
-                show_progress_bar(i, total_items, filter_start_time)
+            if i % 25 == 0 or i == total_torrents:
+                show_progress_bar(i, total_torrents, start_time)
         
         conn.close()
         return results
