@@ -57,6 +57,7 @@ TRACKER_MAPPING = {
     'RF': ['RF', 'reelflix'],
     'RTF': ['RTF', 'retroflix'],
     'SAM': ['SAM', 'samaritano'],
+    'SP': ['SP', 'seedpool'],
     'SN': ['SN', 'swarmazon'],
     'STC': ['STC', 'skipthecommericals'],
     'THR': ['THR', 'torrenthr'],
