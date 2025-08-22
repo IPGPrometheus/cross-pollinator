@@ -31,7 +31,6 @@ TRACKER_MAPPING = {
     'BHDTV': ['BHDTV', 'bit-hdtv'],
     'BLU': ['BLU', 'blutopia'],
     'CBR': ['CBR', 'capybarabr'],
-    'CRT': ['CRT', 'cathode-ray.tube'],
     'DP': ['DP', 'darkpeers'],
     'FL': ['FL', 'filelist', 'FileList'],
     'FNP': ['FNP', 'fearnopeer'],
@@ -63,7 +62,7 @@ TRACKER_MAPPING = {
     'STC': ['STC', 'skipthecommericals'],
     'THR': ['THR', 'torrenthr'],
     'TIK': ['TIK', 'cinematik'],
-    'TL': ['TL', 'torrentleech', 'tleechreload'],  # Fixed TorrentLeech mapping
+    'TL': ['TL', 'torrentleech'],  # Fixed TorrentLeech mapping
     'TOCA': ['TOCA', 'tocashare'],
     'UHD': ['UHD', 'uhdshare'],
     'ULCX': ['ULCX', 'upload'],
@@ -93,37 +92,63 @@ def normalize_tracker_name(raw_name):
             name = name[8:]
         elif name.startswith('http://'):
             name = name[7:]
+        elif name.startswith('udp://'):
+            name = name[6:]
+        elif name.startswith('tracker://'):
+            name = name[10:]
             
         # Remove API suffix
         if name.endswith(' (API)'):
             name = name[:-6]
+        
+        # Remove announce paths and parameters
+        if '/announce' in name:
+            name = name.split('/announce')[0]
+        if '?' in name:
+            name = name.split('?')[0]
+        if ':' in name and not name.startswith('tracker.'):
+            # Handle port numbers, but keep tracker. prefix
+            name = name.split(':')[0]
             
         # Special handling for FileList
         if name.startswith('FileList-'):
             return 'FL'
         
-        # Extract domain from full URLs (e.g., www.torrentleech.org -> torrentleech, hawke.uno -> hawke)
+        # Check for exact matches first
+        for abbrev, variants in TRACKER_MAPPING.items():
+            for variant in variants:
+                if variant.lower() == name:
+                    return abbrev
+        
+        # Extract domain from full URLs for further processing
         if '.' in name and '/' not in name:
             # This is likely a domain name
             domain_parts = name.split('.')
             if len(domain_parts) >= 2:
-                # Extract the main domain part (e.g., torrentleech from www.torrentleech.org, hawke from hawke.uno)
-                if domain_parts[0] == 'www':
-                    main_domain = domain_parts[1]  # Skip 'www' prefix
+                # Handle special tracker domain patterns
+                if name.startswith('tracker.'):
+                    # For tracker.torrentleech.org -> torrentleech
+                    main_domain = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
+                elif name.startswith('reactor.'):
+                    # For reactor.filelist.io -> filelist
+                    main_domain = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
+                elif domain_parts[0] == 'www':
+                    # For www.torrentleech.org -> torrentleech
+                    main_domain = domain_parts[1]
                 else:
-                    main_domain = domain_parts[0]  # Take first part (e.g., hawke from hawke.uno)
-                name = main_domain
+                    # For hawke.uno -> hawke
+                    main_domain = domain_parts[0]
+                
+                # Check if the extracted main domain matches any variants
+                for abbrev, variants in TRACKER_MAPPING.items():
+                    for variant in variants:
+                        if variant.lower() == main_domain:
+                            return abbrev
         
-        # Check for exact matches and substring matches
+        # Final check for substring matches (but be more specific)
         for abbrev, variants in TRACKER_MAPPING.items():
-            # First check for exact matches
             for variant in variants:
-                if variant.lower() == name:
-                    return abbrev
-            
-            # Then check for substring matches (but be more specific)
-            for variant in variants:
-                if variant.lower() in name and len(variant) > 3:  # Avoid short substring matches
+                if len(variant) > 3 and variant.lower() in name:
                     return abbrev
         
         return 'Unknown'
