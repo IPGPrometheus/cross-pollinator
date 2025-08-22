@@ -82,21 +82,25 @@ def is_video_file(filename):
 
 def normalize_tracker_name(raw_name):
     """Normalize tracker names to standard abbreviations."""
-    name = raw_name.lower().strip()
-    
-    if name.startswith('https://'):
-        name = name[8:]
-    if name.endswith(' (API)'):
-        name = name[:-6]
-    if name.startswith('FileList-'):
-        return 'FL'
-    
-    for abbrev, variants in TRACKER_MAPPING.items():
-        for variants in variants:
-            if variants.lower() in name:
-                return abbrev
-    
-    return 'Unknown'
+    try:
+        name = raw_name.lower().strip()
+        
+        if name.startswith('https://'):
+            name = name[8:]
+        if name.endswith(' (API)'):
+            name = name[:-6]
+        if name.startswith('FileList-'):
+            return 'FL'
+        
+        for abbrev, variants in TRACKER_MAPPING.items():
+            for variant in variants:  # Fixed: was overwriting 'variants' variable
+                if variant.lower() in name:
+                    return abbrev
+        
+        return 'Unknown'
+    except Exception as e:
+        print(f"Error normalizing tracker name '{raw_name}': {e}")
+        return 'Unknown'
 
 def get_all_configured_trackers():
     """Get all configured trackers from database decisions."""
@@ -109,10 +113,12 @@ def get_all_configured_trackers():
         
         for row in cursor.fetchall():
             guid = row[0]
-            tracker_name = guid.split('://')[1].split('/')[0]
-            normalized = normalize_tracker_name(tracker_name)
-            if normalized:
-                trackers.add(normalized)
+            # Add safety check for guid format
+            if '://' in guid and '/' in guid:
+                tracker_name = guid.split('://')[1].split('/')[0]
+                normalized = normalize_tracker_name(tracker_name)
+                if normalized and normalized != 'Unknown':
+                    trackers.add(normalized)
         
         conn.close()
         return sorted(trackers)
@@ -161,9 +167,14 @@ def get_torrents_with_paths():
         # Map decisions to torrents
         for row in cursor.fetchall():
             info_hash, guid, decision, torrent_name = row
-            tracker_name = guid.split('.')[0] if '.' in guid else guid
+            # Add safety check for guid format
+            if '.' in guid:
+                tracker_name = guid.split('.')[0]
+            else:
+                tracker_name = guid
+                
             normalized = normalize_tracker_name(tracker_name)
-            if not normalized:
+            if not normalized or normalized == 'Unknown':
                 continue
                 
             for name, info in name_to_info.items():
