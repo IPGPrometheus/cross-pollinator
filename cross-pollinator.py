@@ -57,12 +57,12 @@ TRACKER_MAPPING = {
     'RF': ['RF', 'reelflix'],
     'RTF': ['RTF', 'retroflix'],
     'SAM': ['SAM', 'samaritano'],
-    'SP': ['SP', 'seedpool'],
     'SN': ['SN', 'swarmazon'],
+    'SP': ['SP', 'seedpool'],  # Added SeedPool mapping
     'STC': ['STC', 'skipthecommericals'],
     'THR': ['THR', 'torrenthr'],
     'TIK': ['TIK', 'cinematik'],
-    'TL': ['TL', 'torrentleech'],
+    'TL': ['TL', 'torrentleech', 'tleechreload'],  # Fixed TorrentLeech mapping
     'TOCA': ['TOCA', 'tocashare'],
     'UHD': ['UHD', 'uhdshare'],
     'ULCX': ['ULCX', 'upload'],
@@ -87,16 +87,39 @@ def normalize_tracker_name(raw_name):
     try:
         name = raw_name.lower().strip()
         
+        # Handle URL format
         if name.startswith('https://'):
             name = name[8:]
+        elif name.startswith('http://'):
+            name = name[7:]
+            
+        # Remove API suffix
         if name.endswith(' (API)'):
             name = name[:-6]
+            
+        # Special handling for FileList
         if name.startswith('FileList-'):
             return 'FL'
         
+        # Extract domain from full URLs (e.g., www.torrentleech.org -> torrentleech)
+        if '.' in name and '/' not in name:
+            # This is likely a domain name
+            domain_parts = name.split('.')
+            if len(domain_parts) >= 2:
+                # Extract the main domain part (e.g., torrentleech from www.torrentleech.org)
+                main_domain = domain_parts[-2] if domain_parts[0] == 'www' else domain_parts[0]
+                name = main_domain
+        
+        # Check for exact matches and substring matches
         for abbrev, variants in TRACKER_MAPPING.items():
-            for variant in variants:  # Fixed: was overwriting 'variants' variable
-                if variant.lower() in name:
+            # First check for exact matches
+            for variant in variants:
+                if variant.lower() == name:
+                    return abbrev
+            
+            # Then check for substring matches (but be more specific)
+            for variant in variants:
+                if variant.lower() in name and len(variant) > 3:  # Avoid short substring matches
                     return abbrev
         
         return 'Unknown'
@@ -214,14 +237,10 @@ def get_torrents_with_paths():
             domain = None
             if '://' in guid and '/' in guid:
                 domain = guid.split('://')[1].split('/')[0]
-            
-            # Add safety check for guid format
-            if '.' in guid:
-                tracker_name = guid.split('.')[0]
+                normalized = normalize_tracker_name(domain)
             else:
-                tracker_name = guid
-                
-            normalized = normalize_tracker_name(tracker_name)
+                # Fallback for non-URL guids
+                normalized = normalize_tracker_name(guid)
                 
             for name, info in name_to_info.items():
                 if info_hash in info['info_hashes']:
