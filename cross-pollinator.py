@@ -11,6 +11,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
+import time
 
 # Configuration
 CROSS_SEED_DIR = "/cross-seed"
@@ -127,6 +128,30 @@ def get_all_configured_trackers():
         print(f"Error getting configured trackers: {e}")
         return []
 
+def show_progress_bar(current, total, start_time, bar_length=50):
+    """Display a simple progress bar with time estimates."""
+    if total == 0:
+        return
+    
+    elapsed = time.time() - start_time
+    progress = current / total
+    eta = (elapsed / progress) - elapsed if progress > 0 else 0
+    
+    # Create the bar
+    filled = int(bar_length * progress)
+    bar = '█' * filled + '░' * (bar_length - filled)
+    
+    # Format time
+    elapsed_str = f"{elapsed:.1f}s"
+    eta_str = f"{eta:.1f}s" if eta > 0 else "0.0s"
+    
+    # Print the progress bar
+    print(f"\r[{bar}] {current}/{total} ({progress*100:.1f}%) | Elapsed: {elapsed_str} | ETA: {eta_str}", end='', flush=True)
+    
+    # Print newline when complete
+    if current == total:
+        print()
+
 def get_torrents_with_paths():
     """Get torrents with their file paths and missing trackers."""
     try:
@@ -137,6 +162,9 @@ def get_torrents_with_paths():
         if not all_trackers:
             return []
         
+        print("📊 Getting torrents with paths...")
+        start_time = time.time()
+        
         # Get torrents with paths
         cursor.execute("""
             SELECT name, info_hash, save_path
@@ -145,11 +173,22 @@ def get_torrents_with_paths():
             ORDER BY name
         """)
         
+        torrents_data = cursor.fetchall()
+        total_torrents = len(torrents_data)
+        
         name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set(), 'found_domains': set()})
-        for row in cursor.fetchall():
-            name, info_hash, save_path = row
+        
+        print(f"Processing {total_torrents} torrents...")
+        for i, (name, info_hash, save_path) in enumerate(torrents_data, 1):
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
+            
+            # Show progress every 10 items or on the last item
+            if i % 10 == 0 or i == total_torrents:
+                show_progress_bar(i, total_torrents, start_time)
+        
+        print("📋 Getting decisions from database...")
+        decision_start_time = time.time()
         
         # Get latest decisions for each tracker/info_hash
         cursor.execute("""
@@ -164,9 +203,12 @@ def get_torrents_with_paths():
             )
         """)
         
+        decisions_data = cursor.fetchall()
+        total_decisions = len(decisions_data)
+        
+        print(f"Processing {total_decisions} decisions...")
         # Map decisions to torrents
-        for row in cursor.fetchall():
-            info_hash, guid, decision, torrent_name = row
+        for i, (info_hash, guid, decision, torrent_name) in enumerate(decisions_data, 1):
             # Extract domain from guid
             domain = None
             if '://' in guid and '/' in guid:
@@ -188,10 +230,20 @@ def get_torrents_with_paths():
                         elif domain:
                             info['found_domains'].add(domain)
                     break
+            
+            # Show progress every 50 items or on the last item
+            if i % 50 == 0 or i == total_decisions:
+                show_progress_bar(i, total_decisions, decision_start_time)
+        
+        print("🎬 Filtering video files and building results...")
+        filter_start_time = time.time()
         
         # Build results with missing trackers (filter for video files only)
         results = []
-        for name, info in name_to_info.items():
+        items_to_process = list(name_to_info.items())
+        total_items = len(items_to_process)
+        
+        for i, (name, info) in enumerate(items_to_process, 1):
             # Only include video files
             if not is_video_file(name):
                 continue
@@ -212,6 +264,10 @@ def get_torrents_with_paths():
                     'missing_trackers': missing_trackers,
                     'found_trackers': found_display
                 })
+            
+            # Show progress every 25 items or on the last item
+            if i % 25 == 0 or i == total_items:
+                show_progress_bar(i, total_items, filter_start_time)
         
         conn.close()
         return results
