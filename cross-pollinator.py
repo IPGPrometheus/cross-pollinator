@@ -145,7 +145,7 @@ def get_torrents_with_paths():
             ORDER BY name
         """)
         
-        name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set()})
+        name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set(), 'found_domains': set()})
         for row in cursor.fetchall():
             name, info_hash, save_path = row
             name_to_info[name]['info_hashes'].add(info_hash)
@@ -167,6 +167,11 @@ def get_torrents_with_paths():
         # Map decisions to torrents
         for row in cursor.fetchall():
             info_hash, guid, decision, torrent_name = row
+            # Extract domain from guid
+            domain = None
+            if '://' in guid and '/' in guid:
+                domain = guid.split('://')[1].split('/')[0]
+            
             # Add safety check for guid format
             if '.' in guid:
                 tracker_name = guid.split('.')[0]
@@ -174,13 +179,14 @@ def get_torrents_with_paths():
                 tracker_name = guid
                 
             normalized = normalize_tracker_name(tracker_name)
-            if not normalized or normalized == 'Unknown':
-                continue
                 
             for name, info in name_to_info.items():
                 if info_hash in info['info_hashes']:
                     if decision in SUCCESS_DECISIONS:
-                        info['found_trackers'].add(normalized)
+                        if normalized and normalized != 'Unknown':
+                            info['found_trackers'].add(normalized)
+                        elif domain:
+                            info['found_domains'].add(domain)
                     break
         
         # Build results with missing trackers (filter for video files only)
@@ -194,11 +200,17 @@ def get_torrents_with_paths():
             if missing_trackers and info['paths']:
                 # Use the first available path
                 file_path = list(info['paths'])[0]
+                
+                # Combine found trackers and domains for display
+                found_display = sorted(info['found_trackers'])
+                if info['found_domains']:
+                    found_display.extend(sorted(info['found_domains']))
+                
                 results.append({
                     'name': name,
                     'path': file_path,
                     'missing_trackers': missing_trackers,
-                    'found_trackers': sorted(info['found_trackers'])
+                    'found_trackers': found_display
                 })
         
         conn.close()
