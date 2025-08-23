@@ -185,21 +185,26 @@ def normalize_tracker_name(raw_name):
     """Normalize tracker names to standard abbreviations."""
     name = raw_name.strip()
     original_name = name  # Keep for debugging
-    
-    if name.startswith('https://'):
-        name = name[8:]
-    if name.startswith('https://www.torrentleech'):
-        return 'TL'
-    if name.startswith('https://www.cathode'):
-        return 'CRT'
+
+    # Special case: Filelist shorthand
+    if name.startswith('Filelist-'):
+        return 'FL'
+
+    # Strip protocol and www
+    name = re.sub(r'^(https?:\/\/)?(www\.)?', '', name, flags=re.IGNORECASE)
+
+    # Keep only up to the 3rd "/"
+    parts = name.split('/')
+    if len(parts) > 3:
+        name = '/'.join(parts[:3])
+
+    # Remove trailing ' (API)'
     if name.endswith(' (API)'):
         name = name[:-6]
-    if name.startswith('FileList-'):
-        return 'FL'
-    
-    # Special handling for tracker URLs and variations (case-insensitive)
+
+    # Case-insensitive comparisons
     name_lower = name.lower()
-    
+
     if 'tleechreload.org' in name_lower or 'torrentleech.org' in name_lower:
         return 'TL'
     if 'blutopia.cc' in name_lower or 'blutopia' in name_lower:
@@ -228,15 +233,15 @@ def normalize_tracker_name(raw_name):
         return 'OTW'
     if 'filelist' in name_lower or 'reactor.filelist.io' in name_lower or 'reactor.thefl.org' in name_lower:
         return 'FL'
-    
-    # Check exact matches first, then case-insensitive
+
+    # Check against TRACKER_MAPPING
     for abbrev, variants in TRACKER_MAPPING.items():
         if name in variants:
             return abbrev
         if name.lower() in [v.lower() for v in variants]:
             return abbrev
-    
-    # Debug: Log unrecognized tracker names
+
+    # Debug logging
     print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{name}'")
     return None
 
