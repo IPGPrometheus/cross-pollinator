@@ -183,72 +183,33 @@ def is_anime_content(filename):
     return False
 
 def normalize_tracker_name(raw_name):
-    """Normalize tracker names to standard abbreviations."""
+    """Normalize tracker names to standard abbreviations using TRACKER_MAPPING."""
     name = raw_name.strip()
-    original_name = name  # Keep for debugging
+    original_name = name  # For debugging
 
-    # Special case: Filelist shorthand
+    # Special case: FileList shorthand
     if name.startswith('Filelist-'):
         return 'FL'
 
-    # Strip protocol and www
-    name = re.sub(r'^(https?:\/\/)?(www\.)?', '', name, flags=re.IGNORECASE)
-
-    # If it's a URL, extract domain only
-    parsed = urlparse("http://" + name)  # Add scheme so urlparse works
-    host = parsed.hostname or name
-    # Take only the first two parts of domain (handles subdomains)
-    parts = host.split('.')
-    if len(parts) > 2:
-        # e.g. signal.cathode-ray.tube -> cathode-ray
-        core = parts[-2]
+    # If it's a URL, extract hostname
+    if name.startswith('http'):
+        try:
+            parsed = urlparse(name)
+            host = parsed.netloc.lower()
+        except Exception:
+            host = name.lower()
     else:
-        core = parts[0]
+        host = name.lower()
 
-    # Normalize just to the base keyword
-    name = core.lower()
-
-    # Remove trailing ' (API)'
-    if name.endswith(' (api)'):
-        name = name[:-6]
-
-    # Case-insensitive comparisons
-    if 'torrentleech' in name:
-        return 'TL'
-    if 'blutopia' in name:
-        return 'BLU'
-    if 'beyond-hd' in name:
-        return 'BHD'
-    if 'aither' in name:
-        return 'AITHER'
-    if 'anthelion' in name:
-        return 'ANT'
-    if 'hdbits' in name:
-        return 'HDB'
-    if 'passthepopcorn' in name:
-        return 'PTP'
-    if 'morethantv' in name:
-        return 'MTV'
-    if 'cathode-ray' in name:
-        return 'CRT'
-    if 'hawke' in name:
-        return 'HUNO'
-    if 'lst' in name and len(name) <= 5:  # Avoid false matches
-        return 'LST'
-    if 'onlyencodes' in name:
-        return 'OE'
-    if 'oldtoons' in name:
-        return 'OTW'
-    if 'filelist' in name or 'reactor' in name:
-        return 'FL'
-
-    # Check against TRACKER_MAPPING
+    # Match against TRACKER_MAPPING
     for abbrev, variants in TRACKER_MAPPING.items():
-        if name in [v.lower() for v in variants]:
-            return abbrev
+        for variant in variants:
+            v = variant.lower()
+            if v in host or host in v:
+                return abbrev
 
-    # Debug logging
-    print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{name}'")
+    # Debug logging if no match
+    print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{host}'")
     return None
 
 def normalize_content_name(filename):
