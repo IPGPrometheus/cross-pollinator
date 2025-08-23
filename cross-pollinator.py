@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cross-Pollinator Uploader - Generate Upload Commands (Refactored)
+Cross-Pollinator Uploader - Generate Upload Commands (Improved Tracker Mapping)
 
 Parses cross-seed database using client_searchee table to find missing trackers.
 Uses info_hash to match torrents and trackers column to determine missing trackers.
@@ -59,7 +59,7 @@ TRACKER_MAPPING = {
     'HDU': ['HDU', 'hd-united'],
     'HHD': ['HHD', 'homiehelpdesk'],
     'HPF': ['HPF', 'harrypotterfan'],
-    'HUNO': ['HUNO', 'hawke'],
+    'HUNO': ['HUNO', 'hawke', 'hawke.uno'],
     'iAnon': ['iAnon'],
     'ICE': ['ICE', 'icetorrent'],
     'IPT': ['IPT', 'iptorrents'],
@@ -67,7 +67,7 @@ TRACKER_MAPPING = {
     'JPopsuki': ['JPopsuki'],
     'KG': ['KG', 'karagarga'],
     'LCD': ['LCD', 'locadora'],
-    'LST': ['LST', 'lst'],
+    'LST': ['LST', 'lst', 'lst.gg'],
     'LT': ['LT', 'lat-team'],
     'MAM': ['MAM', 'myanonamouse'],
     'ME': ['ME', 'milkie'],
@@ -76,9 +76,9 @@ TRACKER_MAPPING = {
     'NBL': ['NBL', 'nebulance'],
     'NC': ['NC', 'norbits'],
     'NM': ['NM', 'nostream'],
-    'OE': ['OE', 'onlyencodes'],
-    'OPS': ['OPS', 'orpheus'],
-    'OTW': ['OTW', 'oldtoons'],
+    'OE': ['OE', 'onlyencodes', 'onlyencodes.cc'],
+    'OPS': ['OPS', 'orpheus', 'home.opsfet.ch'],
+    'OTW': ['OTW', 'oldtoons', 'oldtoons.world'],
     'PB': ['PB', 'privatebits'],
     'PHD': ['PHD', 'privatehd'],
     'PirateTheNet': ['PirateTheNet', 'piratethenet'],
@@ -89,18 +89,18 @@ TRACKER_MAPPING = {
     'PTT': ['PTT', 'polishtorrent'],
     'R4E': ['R4E', 'racing4everyone'],
     'RAS': ['RAS', 'rastastugan'],
-    'RED': ['RED', 'redacted'],
+    'RED': ['RED', 'redacted', 'flacsfor.me'],
     'RF': ['RF', 'reelflix'],
     'RTF': ['RTF', 'retroflix'],
     'SAM': ['SAM', 'samaritano'],
     'SC': ['SC', 'scenetime'],
     'SN': ['SN', 'swarmazon'],
-    'SPD': ['SPD', 'speedapp'],
+    'SPD': ['SPD', 'speedapp', 'seedpool.org'],
     'STC': ['STC', 'skipthecommericals'],
     'THC': ['THC', 'thehorrorcult'],
     'THR': ['THR', 'torrenthr'],
     'TIK': ['TIK', 'cinematik'],
-    'TL': ['TL', 'torrentleech', 'tleechreload.org', 'torrentleech.org'],
+    'TL': ['TL', 'torrentleech', 'tleechreload.org', 'torrentleech.org', 'tracker.tleechreload.org', 'tracker.torrentleech.org'],
     'TOCA': ['TOCA', 'tocashare'],
     'TS': ['TS', 'torrentseeds'],
     'TSP': ['TSP', 'thesceneplace'],
@@ -179,16 +179,41 @@ def is_anime_content(filename):
     
     return False
 
-def get_available_trackers_from_mapping():
-    """Get list of trackers that are available based on TRACKER_MAPPING keys."""
-    # These are the trackers we want to consider for cross-seeding
-    # Based on the TRACKER_MAPPING, these are the ones the user likely has access to
-    available_trackers = {
-        'AITHER', 'ANT', 'BLU', 'HUNO', 'LST', 'MAM', 'OE', 'ULCX', 
-        'JPopsuki', 'TL', 'CinemaZ', 'OTW', 'RF', 'FL'
-    }
-    
-    return sorted(available_trackers)
+def extract_unique_trackers_from_db():
+    """Extract all unique tracker domains from the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        print("Extracting unique trackers from database...")
+        
+        # Get all tracker data from database
+        cursor.execute("""
+            SELECT DISTINCT trackers
+            FROM client_searchee
+            WHERE trackers IS NOT NULL 
+            AND trackers != ''
+            AND trackers != '[]'
+        """)
+        
+        unique_domains = set()
+        tracker_combinations = cursor.fetchall()
+        
+        for (trackers_json,) in tracker_combinations:
+            try:
+                trackers_list = json.loads(trackers_json)
+                for domain in trackers_list:
+                    if domain and isinstance(domain, str):
+                        unique_domains.add(domain.strip())
+            except json.JSONDecodeError:
+                continue
+        
+        conn.close()
+        return sorted(unique_domains)
+        
+    except Exception as e:
+        print(f"Error extracting unique trackers: {e}")
+        return []
 
 def map_domain_to_abbreviation(domain):
     """Map a tracker domain to its abbreviation using TRACKER_MAPPING."""
@@ -206,70 +231,52 @@ def map_domain_to_abbreviation(domain):
             if domain_lower == variant_lower:
                 return abbrev
             
-            # Partial match - check if variant is contained in the domain
+            # Check if variant is contained in the domain (handles tracker.domain.org cases)
             if variant_lower in domain_lower:
                 return abbrev
             
-            # Reverse partial match - check if domain is contained in variant
+            # Check if domain is contained in variant  
             if domain_lower in variant_lower:
                 return abbrev
     
     return None
 
-def build_tracker_mapping():
-    """Get unique trackers from database and map them to abbreviations."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        print("Step 1: Getting unique trackers from database...")
-        
-        # Get all unique tracker domains from the database
-        cursor.execute("""
-            SELECT DISTINCT value
-            FROM client_searchee, json_each(client_searchee.trackers)
-            WHERE value IS NOT NULL AND value != ''
-        """)
-        
-        db_domains = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        
-        # Map domains to abbreviations
-        domain_to_abbrev = {}
-        valid_trackers = set()
-        unknown_trackers = []
-        
-        for domain in db_domains:
-            abbrev = map_domain_to_abbreviation(domain)
-            if abbrev:
-                domain_to_abbrev[domain] = abbrev
-                valid_trackers.add(abbrev)
-            else:
-                unknown_trackers.append(domain)
-        
-        valid_trackers = sorted(valid_trackers)
-        
-        print(f"Found {len(db_domains)} total tracker entries")
-        print(f"Mapped {len(domain_to_abbrev)} domains to {len(valid_trackers)} valid trackers: {', '.join(valid_trackers)}")
-        
-        if unknown_trackers:
-            unknown_trackers = sorted(set(unknown_trackers))
-            print(f"Warning: {len(unknown_trackers)} unknown trackers not in mapping:")
-            for tracker in unknown_trackers[:10]:  # Show first 10
-                print(f"  - {tracker}")
-            if len(unknown_trackers) > 10:
-                print(f"  ... and {len(unknown_trackers) - 10} more")
-        
-        return domain_to_abbrev, valid_trackers
-        
-    except Exception as e:
-        print(f"Error building tracker mapping: {e}")
-        return {}, []
+def build_comprehensive_tracker_mapping():
+    """Build a comprehensive mapping of all database domains to abbreviations."""
+    print("Step 1: Building comprehensive tracker mapping...")
+    
+    # Get all unique domains from database
+    unique_domains = extract_unique_trackers_from_db()
+    print(f"Found {len(unique_domains)} unique tracker domains in database")
+    
+    # Map domains to abbreviations
+    domain_to_abbrev = {}
+    mapped_trackers = set()
+    unknown_domains = []
+    
+    for domain in unique_domains:
+        abbrev = map_domain_to_abbreviation(domain)
+        if abbrev:
+            domain_to_abbrev[domain] = abbrev
+            mapped_trackers.add(abbrev)
+        else:
+            unknown_domains.append(domain)
+    
+    print(f"Successfully mapped {len(domain_to_abbrev)} domains to {len(mapped_trackers)} tracker abbreviations")
+    print(f"Mapped trackers: {', '.join(sorted(mapped_trackers))}")
+    
+    if unknown_domains:
+        print(f"\nWarning: {len(unknown_domains)} domains could not be mapped:")
+        for domain in sorted(unknown_domains):
+            print(f"  - {domain}")
+        print("\nConsider adding these to TRACKER_MAPPING if they are valid trackers")
+    
+    return domain_to_abbrev, sorted(mapped_trackers)
 
-def get_all_unique_trackers():
-    """Get all unique trackers from client_searchee.trackers column."""
-    domain_to_abbrev, valid_trackers = build_tracker_mapping()
-    return valid_trackers
+def get_available_trackers_from_mapping():
+    """Get list of trackers that are available based on what's actually in the database."""
+    _, mapped_trackers = build_comprehensive_tracker_mapping()
+    return mapped_trackers
 
 def filter_relevant_trackers(all_trackers, filename, available_trackers=None):
     """Filter trackers based on content type and available trackers."""
@@ -322,17 +329,14 @@ def analyze_missing_trackers():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get domain to abbreviation mapping and valid trackers
-        domain_to_abbrev, all_db_trackers = build_tracker_mapping()
+        # Build comprehensive domain to abbreviation mapping
+        domain_to_abbrev, available_trackers = build_comprehensive_tracker_mapping()
         
-        if not all_db_trackers:
-            print("No trackers found in database")
+        if not available_trackers:
+            print("No trackers found in database that match TRACKER_MAPPING")
             return []
         
-        # Get available trackers that we want to consider for cross-seeding
-        available_trackers = get_available_trackers_from_mapping()
         print(f"Available trackers for cross-seeding: {', '.join(available_trackers)}")
-        print(f"Total trackers found in database: {', '.join(all_db_trackers)}")
         
         # Get all torrents with their tracker lists and paths
         print("\nStep 2: Analyzing torrents and their tracker coverage...")
@@ -489,82 +493,59 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     print(f"Upload commands written to: {filename}")
     return filename
 
-def debug_database_content(limit=10):
-    """Debug function to inspect database content."""
+def debug_tracker_mapping():
+    """Debug function to show detailed tracker mapping analysis."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     appdata_dir = Path(LOG_DIR)
     appdata_dir.mkdir(parents=True, exist_ok=True)
-    debug_file = appdata_dir / f"debug_output_{timestamp}.txt"
+    debug_file = appdata_dir / f"tracker_mapping_debug_{timestamp}.txt"
+    
+    print("Running detailed tracker mapping analysis...")
     
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        # Get unique domains from database
+        unique_domains = extract_unique_trackers_from_db()
+        domain_to_abbrev, mapped_trackers = build_comprehensive_tracker_mapping()
         
         with open(debug_file, 'w') as f:
-            f.write("DEBUG: Cross-Seed Database Analysis\n")
-            f.write("=" * 50 + "\n")
+            f.write("TRACKER MAPPING ANALYSIS\n")
+            f.write("=" * 50 + "\n\n")
             
-            # Check client_searchee table structure
-            cursor.execute("PRAGMA table_info(client_searchee)")
-            columns = cursor.fetchall()
-            f.write("client_searchee table columns:\n")
-            for col in columns:
-                f.write(f"  {col[1]} ({col[2]})\n")
+            f.write(f"Total unique domains in database: {len(unique_domains)}\n")
+            f.write(f"Successfully mapped domains: {len(domain_to_abbrev)}\n")
+            f.write(f"Unique tracker abbreviations: {len(mapped_trackers)}\n\n")
             
-            # Count records
-            cursor.execute("SELECT COUNT(*) FROM client_searchee")
-            total_count = cursor.fetchone()[0]
-            f.write(f"\nTotal client_searchee records: {total_count}\n")
+            f.write("DOMAIN TO ABBREVIATION MAPPING:\n")
+            f.write("-" * 40 + "\n")
+            for domain in sorted(unique_domains):
+                abbrev = domain_to_abbrev.get(domain, "UNMAPPED")
+                f.write(f"{domain:<35} -> {abbrev}\n")
             
-            cursor.execute("SELECT COUNT(*) FROM client_searchee WHERE save_path IS NOT NULL AND save_path != ''")
-            with_paths = cursor.fetchone()[0]
-            f.write(f"Records with save_path: {with_paths}\n")
+            f.write(f"\nMAPPED TRACKER ABBREVIATIONS ({len(mapped_trackers)}):\n")
+            f.write("-" * 40 + "\n")
+            for abbrev in sorted(mapped_trackers):
+                f.write(f"  {abbrev}\n")
             
-            cursor.execute("SELECT COUNT(*) FROM client_searchee WHERE trackers IS NOT NULL AND trackers != '' AND trackers != '[]'")
-            with_trackers = cursor.fetchone()[0]
-            f.write(f"Records with trackers: {with_trackers}\n")
-            
-            # Show tracker analysis
-            f.write(f"\nTracker Analysis:\n")
-            domain_to_abbrev, all_db_trackers = build_tracker_mapping()
-            available_trackers = get_available_trackers_from_mapping()
-            
-            f.write(f"\nDomain to abbreviation mapping:\n")
-            for domain, abbrev in sorted(domain_to_abbrev.items()):
-                f.write(f"  {domain} -> {abbrev}\n")
-            
-            f.write(f"\nTrackers found in database ({len(all_db_trackers)}):\n")
-            f.write(f"  {', '.join(all_db_trackers)}\n")
-            
-            f.write(f"\nAvailable trackers for cross-seeding ({len(available_trackers)}):\n")
-            f.write(f"  {', '.join(available_trackers)}\n")
-            
-            # Sample tracker data
-            f.write(f"\nSample torrent tracker data (first {limit}):\n")
-            cursor.execute("""
-                SELECT name, trackers 
-                FROM client_searchee 
-                WHERE trackers IS NOT NULL 
-                AND trackers != '' 
-                AND trackers != '[]'
-                LIMIT ?
-            """, (limit,))
-            
-            for name, trackers_json in cursor.fetchall():
-                try:
-                    trackers = json.loads(trackers_json)
-                    f.write(f"  {name}:\n")
-                    for tracker in trackers:
-                        abbrev = domain_to_abbrev.get(tracker, "UNMAPPED")
-                        f.write(f"    {tracker} -> {abbrev}\n")
-                except json.JSONDecodeError:
-                    f.write(f"  {name}: Invalid JSON\n")
-            
-        conn.close()
-        print(f"Debug output written to: {debug_file}")
+            # Show unmapped domains
+            unmapped = [d for d in unique_domains if d not in domain_to_abbrev]
+            if unmapped:
+                f.write(f"\nUNMAPPED DOMAINS ({len(unmapped)}):\n")
+                f.write("-" * 40 + "\n")
+                for domain in sorted(unmapped):
+                    f.write(f"  {domain}\n")
+                    
+                f.write(f"\nSUGGESTED TRACKER_MAPPING ADDITIONS:\n")
+                f.write("-" * 40 + "\n")
+                for domain in sorted(unmapped):
+                    # Try to guess abbreviation from domain
+                    if '.' in domain:
+                        potential_abbrev = domain.split('.')[0].upper()
+                        f.write(f"    '{potential_abbrev}': ['{potential_abbrev.lower()}', '{domain}'],\n")
+        
+        print(f"Detailed tracker mapping analysis written to: {debug_file}")
         
     except Exception as e:
-        print(f"Error in debug function: {e}")
+        print(f"Error in tracker mapping debug: {e}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -574,11 +555,11 @@ def main():
     parser.add_argument('--output', nargs='?', const='default', help='Generate upload commands file (optional filename)')
     parser.add_argument('--no-emoji', action='store_true', help='Remove all emojis from output')
     parser.add_argument('--output-clean', action='store_true', help='Generate clean output with only upload commands')
-    parser.add_argument('--debug', action='store_true', help='Show debug information about database content')
+    parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
     
     args = parser.parse_args()
     
-    if not args.run:
+    if not args.run and not args.debug_trackers:
         parser.print_help()
         sys.exit(1)
     
@@ -586,9 +567,11 @@ def main():
         print(f"Database not found: {DB_PATH}")
         sys.exit(1)
     
-    # Show debug info if requested
-    if args.debug:
-        debug_database_content()
+    # Show debug tracker mapping if requested
+    if args.debug_trackers:
+        debug_tracker_mapping()
+        if not args.run:
+            return
         print()
     
     print("Analyzing cross-seed database for missing torrents...")
