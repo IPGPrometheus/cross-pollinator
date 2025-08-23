@@ -341,6 +341,17 @@ def get_torrents_with_paths():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        # First, let's check what columns exist in client_searchee
+        cursor.execute("PRAGMA table_info(client_searchee)")
+        columns = cursor.fetchall()
+        print("🔍 Available columns in client_searchee:")
+        for col in columns:
+            print(f"   {col[1]} ({col[2]})")
+        
+        # Check if there's a tracker column
+        column_names = [col[1] for col in columns]
+        has_tracker_column = 'tracker' in column_names
+        
         print("🔍 Getting configured trackers...")
         all_trackers = get_all_configured_trackers()
         active_trackers = get_active_trackers()
@@ -379,92 +390,194 @@ def get_torrents_with_paths():
         
         print()  # New line after progress bar
         
-        # Cross-reference successful decisions with client_searchee tracker info
-        print("🔄 Cross-referencing successful decisions with tracker info...")
-        cursor.execute("""
-            SELECT DISTINCT d.info_hash, cs.tracker
-            FROM decision d
-            JOIN client_searchee cs ON d.info_hash = cs.info_hash
-            WHERE d.decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
-            AND cs.tracker IS NOT NULL
-            AND cs.tracker != ''
-        """)
-        
-        cross_ref_rows = cursor.fetchall()
-        total_cross_refs = len(cross_ref_rows)
-        
-        # Process cross-referenced data with progress bar
-        cross_ref_start = time.time()
-        debug_tracker_matches = defaultdict(int)  # Debug: count successful tracker matches
-        unmatched_domains = set()  # Track unmatched domains for debugging
-        
-        for i, row in enumerate(cross_ref_rows):
-            if i % 100 == 0 or i == total_cross_refs - 1:  # Update every 100 items or at the end
-                print_progress_bar(i + 1, total_cross_refs, cross_ref_start, "Cross-referencing trackers")
+        if has_tracker_column:
+            # Cross-reference successful decisions with client_searchee tracker info
+            print("🔄 Cross-referencing successful decisions with tracker info...")
+            cursor.execute("""
+                SELECT DISTINCT d.info_hash, cs.tracker
+                FROM decision d
+                JOIN client_searchee cs ON d.info_hash = cs.info_hash
+                WHERE d.decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
+                AND cs.tracker IS NOT NULL
+                AND cs.tracker != ''
+            """)
             
-            info_hash, tracker_url = row
+            cross_ref_rows = cursor.fetchall()
+            total_cross_refs = len(cross_ref_rows)
             
-            # Look up torrent name by info_hash
-            if info_hash in info_hash_to_name:
-                torrent_name = info_hash_to_name[info_hash]
+            # Process cross-referenced data with progress bar
+            cross_ref_start = time.time()
+            debug_tracker_matches = defaultdict(int)  # Debug: count successful tracker matches
+            unmatched_domains = set()  # Track unmatched domains for debugging
+            
+            for i, row in enumerate(cross_ref_rows):
+                if i % 100 == 0 or i == total_cross_refs - 1:  # Update every 100 items or at the end
+                    print_progress_bar(i + 1, total_cross_refs, cross_ref_start, "Cross-referencing trackers")
                 
-                # Extract domain from tracker URL
-                if tracker_url.startswith('http'):
-                    try:
-                        from urllib.parse import urlparse
-                        parsed = urlparse(tracker_url)
-                        domain = parsed.netloc.lower()
-                        
-                        # Find matching tracker in TRACKER_MAPPING
+                info_hash, tracker_url = row
+                
+                # Look up torrent name by info_hash
+                if info_hash in info_hash_to_name:
+                    torrent_name = info_hash_to_name[info_hash]
+                    
+                    # Extract domain from tracker URL
+                    if tracker_url.startswith('http'):
+                        try:
+                            from urllib.parse import urlparse
+                            parsed = urlparse(tracker_url)
+                            domain = parsed.netloc.lower()
+                            
+                            # Find matching tracker in TRACKER_MAPPING
+                            found_tracker = None
+                            for abbrev, variants in TRACKER_MAPPING.items():
+                                # Check if domain matches any variant (case-insensitive)
+                                for variant in variants:
+                                    if variant.lower() in domain or domain in variant.lower():
+                                        found_tracker = abbrev
+                                        break
+                                if found_tracker:
+                                    break
+                            
+                            if found_tracker:
+                                name_to_info[torrent_name]['found_trackers'].add(found_tracker)
+                                debug_tracker_matches[found_tracker] += 1
+                            else:
+                                # Track unmatched domains for debugging
+                                unmatched_domains.add(domain)
+                                
+                        except Exception as e:
+                            print(f"Error parsing tracker URL {tracker_url}: {e}")
+                            continue
+                    else:
+                        # Non-URL tracker name - try direct mapping
                         found_tracker = None
                         for abbrev, variants in TRACKER_MAPPING.items():
-                            # Check if domain matches any variant (case-insensitive)
-                            for variant in variants:
-                                if variant.lower() in domain or domain in variant.lower():
-                                    found_tracker = abbrev
-                                    break
-                            if found_tracker:
+                            if tracker_url in variants or tracker_url.lower() in [v.lower() for v in variants]:
+                                found_tracker = abbrev
                                 break
                         
                         if found_tracker:
                             name_to_info[torrent_name]['found_trackers'].add(found_tracker)
                             debug_tracker_matches[found_tracker] += 1
                         else:
-                            # Track unmatched domains for debugging
-                            unmatched_domains.add(domain)
-                            
-                    except Exception as e:
-                        print(f"Error parsing tracker URL {tracker_url}: {e}")
-                        continue
-                else:
-                    # Non-URL tracker name - try direct mapping
-                    found_tracker = None
-                    for abbrev, variants in TRACKER_MAPPING.items():
-                        if tracker_url in variants or tracker_url.lower() in [v.lower() for v in variants]:
-                            found_tracker = abbrev
-                            break
-                    
-                    if found_tracker:
-                        name_to_info[torrent_name]['found_trackers'].add(found_tracker)
-                        debug_tracker_matches[found_tracker] += 1
-                    else:
-                        unmatched_domains.add(tracker_url)
-        
-        print()  # New line after progress bar
-        
-        # Debug output: show tracker match counts
-        if debug_tracker_matches:
-            print("🔍 Debug - Tracker matches from cross-reference:")
-            for tracker, count in sorted(debug_tracker_matches.items()):
-                print(f"   {tracker}: {count} matches")
+                            unmatched_domains.add(tracker_url)
+            
+            print()  # New line after progress bar
+            
+            # Debug output: show tracker match counts
+            if debug_tracker_matches:
+                print("🔍 Debug - Tracker matches from cross-reference:")
+                for tracker, count in sorted(debug_tracker_matches.items()):
+                    print(f"   {tracker}: {count} matches")
+            else:
+                print("⚠️  Debug - No tracker matches found from cross-reference!")
+            
+            # Show unmatched domains for debugging (limit to first 10)
+            if unmatched_domains:
+                print(f"🔍 Debug - Unmatched domains/trackers (showing first 10):")
+                for domain in sorted(list(unmatched_domains)[:10]):
+                    print(f"   {domain}")
         else:
-            print("⚠️  Debug - No tracker matches found from cross-reference!")
-        
-        # Show unmatched domains for debugging (limit to first 10)
-        if unmatched_domains:
-            print(f"🔍 Debug - Unmatched domains/trackers (showing first 10):")
-            for domain in sorted(list(unmatched_domains)[:10]):
-                print(f"   {domain}")
+            # No tracker column, fall back to GUID method
+            print("⚠️  No tracker column found in client_searchee, falling back to GUID analysis...")
+            
+            # Get all decisions and extract tracker info from GUIDs
+            cursor.execute("""
+                SELECT info_hash, guid, decision, last_seen
+                FROM decision
+                WHERE guid IS NOT NULL
+                AND decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
+                ORDER BY info_hash, guid, last_seen DESC
+            """)
+            
+            decision_rows = cursor.fetchall()
+            total_decisions = len(decision_rows)
+            
+            # Process decisions with progress bar - keep only latest decision per info_hash/guid pair
+            decision_start = time.time()
+            processed_pairs = set()  # Track processed (info_hash, guid) pairs
+            debug_tracker_matches = defaultdict(int)  # Debug: count successful tracker matches
+            
+            for i, row in enumerate(decision_rows):
+                if i % 100 == 0 or i == total_decisions - 1:  # Update every 100 decisions or at the end
+                    print_progress_bar(i + 1, total_decisions, decision_start, "Processing decisions")
+                
+                info_hash, guid, decision, last_seen = row
+                pair_key = (info_hash, guid)
+                
+                # Skip if we've already processed this info_hash/tracker combination (keeps latest due to ORDER BY)
+                if pair_key in processed_pairs:
+                    continue
+                processed_pairs.add(pair_key)
+                
+                # Extract tracker name from GUID - simplified approach
+                normalized_tracker = None
+                
+                if guid.startswith('FileList-'):
+                    normalized_tracker = 'FL'
+                elif guid.startswith('https://'):
+                    # Remove https:// and take the domain
+                    try:
+                        domain = guid[8:].split('/')[0].lower()
+                        
+                        # Direct domain mapping
+                        domain_mapping = {
+                            'hawke.uno': 'HUNO',
+                            'www.torrentleech.org': 'TL',
+                            'torrentleech.org': 'TL',
+                            'tleechreload.org': 'TL',
+                            'seedpool.org': 'SPD',
+                            'oldtoons.world': 'OTW',
+                            'lst.gg': 'LST',
+                            'onlyencodes.cc': 'OE',
+                            'aither.cc': 'AITHER',
+                            'www.cathode-ray.tube': 'CRT',
+                            'cathode-ray.tube': 'CRT',
+                            'signal.cathode-ray.tube': 'CRT',
+                            'blutopia.cc': 'BLU',
+                            'beyond-hd.me': 'BHD',
+                            'anthelion.me': 'ANT',
+                            'hdbits.org': 'HDB',
+                            'passthepopcorn.me': 'PTP',
+                            'morethantv.me': 'MTV',
+                            'filelist.io': 'FL',
+                            'reactor.filelist.io': 'FL',
+                            'reactor.thefl.org': 'FL'
+                        }
+                        
+                        normalized_tracker = domain_mapping.get(domain)
+                        
+                        # Handle incomplete URLs like https://www or https://seedpool
+                        if not normalized_tracker and '.' not in domain:
+                            if domain == 'www':
+                                normalized_tracker = 'TL'  # Assuming www is torrentleech
+                            elif domain == 'seedpool':
+                                normalized_tracker = 'SPD'
+                            elif domain == 'lst':
+                                normalized_tracker = 'LST'
+                            elif domain == 'oldtoons':
+                                normalized_tracker = 'OTW'
+                        
+                    except Exception:
+                        pass
+                else:
+                    # Try existing normalization for non-URLs
+                    normalized_tracker = normalize_tracker_name(guid)
+                
+                if normalized_tracker and info_hash in info_hash_to_name:
+                    torrent_name = info_hash_to_name[info_hash]
+                    name_to_info[torrent_name]['found_trackers'].add(normalized_tracker)
+                    debug_tracker_matches[normalized_tracker] += 1
+            
+            print()  # New line after progress bar
+            
+            # Debug output: show tracker match counts
+            if debug_tracker_matches:
+                print("🔍 Debug - Tracker matches from GUID analysis:")
+                for tracker, count in sorted(debug_tracker_matches.items()):
+                    print(f"   {tracker}: {count} matches")
+            else:
+                print("⚠️  Debug - No tracker matches found from GUID analysis!")
         
         print()  # New line after debug output
         
