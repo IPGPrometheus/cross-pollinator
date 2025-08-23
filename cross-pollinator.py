@@ -255,6 +255,8 @@ def get_all_configured_trackers():
         trackers = set()
         for row in cursor.fetchall():
             tracker_url = row[0]
+            if tracker_url.lower() == "tracker":  # skip junk
+                continue
             normalized = normalize_tracker_name(tracker_url)
             if normalized:
                 trackers.add(normalized)
@@ -279,6 +281,35 @@ def filter_relevant_trackers(all_trackers, filename, active_trackers):
     else:
         # For non-anime, exclude anime-specific trackers
         return sorted(relevant_trackers - ANIME_TRACKERS)
+        
+def normalize_content_name(filename):
+    """Normalize content name for duplicate detection."""
+    name = Path(filename).stem
+
+    quality_patterns = [
+        r'\.\d{3,4}p\.',
+        r'\.BluRay\.',
+        r'\.WEB-DL\.',
+        r'\.WEBRip\.',
+        r'\.BDRip\.',
+        r'\.DVDRip\.',
+        r'\.AMZN\.',
+        r'\.FLUX\.',
+        r'\.ATMOS\.',
+        r'\.DDP\d+\.\d+\.',
+        r'\.H\.264-',
+        r'\.x264-',
+        r'\.x265-',
+        r'-[A-Z0-9]+$',
+    ]
+
+    normalized = name
+    for pattern in quality_patterns:
+        normalized = re.sub(pattern, '.', normalized, flags=re.IGNORECASE)
+
+    normalized = re.sub(r'\.+', '.', normalized).strip('.')
+    return normalized.lower()
+
 
 def get_torrents_with_paths():
     """Get torrents with their file paths and missing trackers."""
