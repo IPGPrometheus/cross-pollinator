@@ -78,7 +78,7 @@ TRACKER_MAPPING = {
     'NM': ['NM', 'nostream'],
     'OE': ['OE', 'onlyencodes'],
     'OPS': ['OPS', 'orpheus'],
-    'OTW': ['OTW', 'oldtoons.world'],
+    'OTW': ['OTW', 'oldtoons'],
     'PB': ['PB', 'privatebits'],
     'PHD': ['PHD', 'privatehd'],
     'PirateTheNet': ['PirateTheNet', 'piratethenet'],
@@ -212,43 +212,59 @@ def normalize_tracker_url(tracker_url):
     
     return None
 
-def get_all_unique_trackers():
-    """Get all unique trackers from client_searchee.trackers column."""
+def build_tracker_mapping():
+    """Build a mapping of raw tracker URLs to normalized abbreviations."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print("Getting all unique trackers from database...")
+        print("Step 1: Building tracker mapping from database...")
         
-        # Get all tracker JSON arrays from client_searchee
+        # Get all unique tracker URLs from the database
         cursor.execute("""
-            SELECT DISTINCT trackers 
-            FROM client_searchee 
-            WHERE trackers IS NOT NULL 
-            AND trackers != ''
-            AND trackers != '[]'
+            SELECT DISTINCT value
+            FROM client_searchee, json_each(client_searchee.trackers)
+            WHERE value IS NOT NULL AND value != ''
         """)
         
-        all_trackers = set()
-        tracker_rows = cursor.fetchall()
-        
-        for row in tracker_rows:
-            trackers_json = row[0]
-            try:
-                tracker_list = json.loads(trackers_json)
-                for tracker_url in tracker_list:
-                    normalized = normalize_tracker_url(tracker_url)
-                    if normalized:
-                        all_trackers.add(normalized)
-            except json.JSONDecodeError:
-                continue
-        
+        raw_trackers = [row[0] for row in cursor.fetchall()]
         conn.close()
-        return sorted(all_trackers)
+        
+        # Build mapping of raw tracker -> normalized abbreviation
+        tracker_map = {}
+        unmatched_trackers = []
+        
+        print(f"Found {len(raw_trackers)} unique tracker URLs to map")
+        
+        for raw_tracker in raw_trackers:
+            normalized = normalize_tracker_url(raw_tracker)
+            if normalized:
+                tracker_map[raw_tracker] = normalized
+            else:
+                unmatched_trackers.append(raw_tracker)
+        
+        print(f"Successfully mapped {len(tracker_map)} trackers")
+        if unmatched_trackers:
+            print(f"Warning: {len(unmatched_trackers)} trackers could not be mapped:")
+            for tracker in sorted(unmatched_trackers)[:10]:  # Show first 10
+                print(f"  - {tracker}")
+            if len(unmatched_trackers) > 10:
+                print(f"  ... and {len(unmatched_trackers) - 10} more")
+        
+        # Get unique normalized tracker abbreviations
+        unique_trackers = sorted(set(tracker_map.values()))
+        print(f"Available tracker abbreviations: {', '.join(unique_trackers)}")
+        
+        return tracker_map, unique_trackers
         
     except Exception as e:
-        print(f"Error getting unique trackers: {e}")
-        return []
+        print(f"Error building tracker mapping: {e}")
+        return {}, []
+
+def get_all_unique_trackers():
+    """Get all unique trackers from client_searchee.trackers column."""
+    tracker_map, unique_trackers = build_tracker_mapping()
+    return unique_trackers
 
 def filter_relevant_trackers(all_trackers, filename):
     """Filter trackers based on content type."""
@@ -295,9 +311,8 @@ def analyze_missing_trackers():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get all unique trackers first
-        print("Step 1: Getting all configured trackers...")
-        all_trackers = get_all_unique_trackers()
+        # Build tracker mapping and get all unique trackers
+        tracker_map, all_trackers = build_tracker_mapping()
         
         if not all_trackers:
             print("No trackers found in database")
@@ -345,12 +360,11 @@ def analyze_missing_trackers():
                 # Parse the trackers JSON
                 current_trackers = json.loads(trackers_json)
                 
-                # Normalize tracker URLs to abbreviations
+                # Use pre-built mapping to normalize tracker URLs
                 found_trackers = set()
                 for tracker_url in current_trackers:
-                    normalized = normalize_tracker_url(tracker_url)
-                    if normalized:
-                        found_trackers.add(normalized)
+                    if tracker_url in tracker_map:
+                        found_trackers.add(tracker_map[tracker_url])
                 
                 # Filter relevant trackers for this content
                 relevant_trackers = filter_relevant_trackers(all_trackers, name)
@@ -496,8 +510,19 @@ def debug_database_content(limit=10):
             with_trackers = cursor.fetchone()[0]
             f.write(f"Records with trackers: {with_trackers}\n")
             
+            # Show tracker mapping
+            f.write(f"\nTracker Mapping Analysis:\n")
+            tracker_map, unique_trackers = build_tracker_mapping()
+            
+            f.write(f"\nRaw tracker URL to normalized mapping:\n")
+            for raw, normalized in sorted(tracker_map.items()):
+                f.write(f"  {raw} -> {normalized}\n")
+            
+            f.write(f"\nUnique normalized trackers ({len(unique_trackers)}):\n")
+            f.write(f"  {', '.join(unique_trackers)}\n")
+            
             # Sample tracker data
-            f.write(f"\nSample tracker data (first {limit}):\n")
+            f.write(f"\nSample torrent tracker data (first {limit}):\n")
             cursor.execute("""
                 SELECT name, trackers 
                 FROM client_searchee 
@@ -512,15 +537,10 @@ def debug_database_content(limit=10):
                     trackers = json.loads(trackers_json)
                     f.write(f"  {name}:\n")
                     for tracker in trackers:
-                        normalized = normalize_tracker_url(tracker)
+                        normalized = tracker_map.get(tracker, "UNMAPPED")
                         f.write(f"    {tracker} -> {normalized}\n")
                 except json.JSONDecodeError:
                     f.write(f"  {name}: Invalid JSON\n")
-            
-            # Unique trackers summary
-            all_trackers = get_all_unique_trackers()
-            f.write(f"\nUnique normalized trackers ({len(all_trackers)}):\n")
-            f.write(f"  {', '.join(all_trackers)}\n")
             
         conn.close()
         print(f"Debug output written to: {debug_file}")
