@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir \
     torf \
     requests \
     click \
-    rich
+    rich \
+    python-dotenv
 
 # Create app directory structure
 WORKDIR /app
