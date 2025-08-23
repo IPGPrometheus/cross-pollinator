@@ -13,14 +13,17 @@ import json
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 import re
 import time
 
-# Configuration
-CROSS_SEED_DIR = "/cross-seed"
-DB_PATH = "/cross-seed/cross-seed.db"
+load_dotenv()
 
-# Use environment variable or default to /logs (writable volume)
+# Configuration
+# Look for the cross-seed directory from an environment variable,
+# default to /cross-seed for Docker compatibility.
+CROSS_SEED_DIR = os.environ.get('CROSS_SEED_DIR', '/cross-seed')
+DB_PATH = os.path.join(CROSS_SEED_DIR, 'cross-seed.db')
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
 
 # Comprehensive tracker mapping - Updated with exact domain matches first
