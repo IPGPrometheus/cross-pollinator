@@ -129,12 +129,6 @@ TRACKER_MAPPING = {
     'YUS': ['YUS', 'yu-scene']
 }
 
-# Anime-specific trackers that should only be considered for anime content
-ANIME_TRACKERS = {'AL', 'ACM'}
-
-# General movie/TV trackers that should be excluded from anime content
-GENERAL_TRACKERS = {'PTP', 'HDB', 'BLU', 'BHD', 'AITHER', 'ANT', 'MTV', 'FL', 'TL', 'BTN', 'PHD'}
-
 def print_progress_bar(current, total, start_time, prefix="Progress", length=50):
     """Print a progress bar with estimated time remaining."""
     if total == 0:
@@ -164,33 +158,6 @@ def is_video_file(filename):
         '.ts', '.mts', '.m2ts', '.divx', '.xvid', '.f4v', '.ogv'
     }
     return Path(filename).suffix.lower() in video_extensions
-
-def is_anime_content(filename):
-    """Detect if content is likely anime based on filename patterns."""
-    filename_lower = filename.lower()
-    
-    # Common anime patterns
-    anime_indicators = [
-        # Episode patterns
-        r's\d{2}e\d{2}',  # S01E01 format
-        r'ep\d+',         # Episode number
-        r'episode\s*\d+', # Episode word + number
-        
-        # Japanese/anime specific terms
-        'anime', 'manga', 'ova', 'ona', 'special', 'omake',
-        
-        # Common anime groups/tags
-        'horriblesubs', 'subsplease', 'erai-raws', 'commie',
-        
-        # Language indicators
-        'japanese', 'jpn', 'subbed', 'dubbed'
-    ]
-    
-    for pattern in anime_indicators:
-        if re.search(pattern, filename_lower):
-            return True
-    
-    return False
 
 def extract_unique_trackers_from_db():
     """Extract all unique tracker domains from the database."""
@@ -226,6 +193,55 @@ def extract_unique_trackers_from_db():
         
     except Exception as e:
         print(f"Error extracting unique trackers: {e}")
+        return []
+
+def extract_unique_tags_from_db():
+    """Extract all unique tags from the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        print("Extracting unique tags from database...")
+        
+        # Get all tags from database
+        cursor.execute("""
+            SELECT DISTINCT tags
+            FROM client_searchee
+            WHERE tags IS NOT NULL 
+            AND tags != ''
+            AND tags != '[]'
+        """)
+        
+        unique_tags = set()
+        tag_combinations = cursor.fetchall()
+        
+        for (tags_json,) in tag_combinations:
+            try:
+                if tags_json.startswith('[') and tags_json.endswith(']'):
+                    # JSON array format
+                    tags_list = json.loads(tags_json)
+                    for tag in tags_list:
+                        if tag and isinstance(tag, str):
+                            unique_tags.add(tag.strip())
+                else:
+                    # Single tag or comma-separated
+                    tags = tags_json.split(',')
+                    for tag in tags:
+                        if tag.strip():
+                            unique_tags.add(tag.strip())
+            except (json.JSONDecodeError, AttributeError):
+                # Try treating as plain text
+                if tags_json:
+                    tags = str(tags_json).split(',')
+                    for tag in tags:
+                        if tag.strip():
+                            unique_tags.add(tag.strip())
+        
+        conn.close()
+        return sorted(unique_tags)
+        
+    except Exception as e:
+        print(f"Error extracting unique tags: {e}")
         return []
 
 def map_domain_to_abbreviation(domain):
@@ -299,22 +315,76 @@ def get_available_trackers_from_mapping():
     _, mapped_trackers = build_comprehensive_tracker_mapping()
     return mapped_trackers
 
-def filter_relevant_trackers(all_trackers, filename, available_trackers=None):
-    """Filter trackers based on content type and available trackers."""
-    is_anime = is_anime_content(filename)
-    
+def filter_relevant_trackers(all_trackers, filename=None, available_trackers=None):
+    """Filter trackers based on available trackers only (removed content type filtering)."""
     # If available_trackers is provided, only consider those trackers
     if available_trackers:
         candidate_trackers = set(all_trackers) & set(available_trackers)
     else:
         candidate_trackers = set(all_trackers)
     
-    if is_anime:
-        # For anime, include anime trackers and exclude general movie/TV trackers
-        return sorted(candidate_trackers & (ANIME_TRACKERS | (candidate_trackers - GENERAL_TRACKERS)))
-    else:
-        # For non-anime, exclude anime-specific trackers
-        return sorted(candidate_trackers - ANIME_TRACKERS)
+    # Return all available trackers - no content-based filtering
+    return sorted(candidate_trackers)
+
+def prompt_tag_filter(available_tags):
+    """Prompt user to select which tags to filter by."""
+    if not available_tags:
+        return None
+    
+    print(f"\nFound tags: {', '.join(available_tags)}")
+    print("\nDo you want to filter by all tags? Y/N")
+    
+    while True:
+        choice = input().strip().upper()
+        if choice == 'Y':
+            return available_tags  # Return all tags
+        elif choice == 'N':
+            print(f"\nPlease select which tags to filter by (comma-separated):")
+            print(f"Available tags: {', '.join(available_tags)}")
+            
+            while True:
+                selected = input().strip()
+                if not selected:
+                    return None
+                
+                selected_tags = [tag.strip() for tag in selected.split(',')]
+                valid_tags = [tag for tag in selected_tags if tag in available_tags]
+                
+                if valid_tags:
+                    return valid_tags
+                else:
+                    print("No valid tags selected. Please try again.")
+        else:
+            print("Please enter Y or N:")
+
+def filter_results_by_tags(results, selected_tags):
+    """Filter results by selected tags and group them."""
+    if not selected_tags:
+        return {'all': results}
+    
+    grouped_results = {}
+    
+    for tag in selected_tags:
+        grouped_results[tag] = []
+    
+    # Add an 'other' category for items that don't match any selected tags
+    grouped_results['other'] = []
+    
+    for result in results:
+        item_tags = result.get('tags', [])
+        matched_any = False
+        
+        for tag in selected_tags:
+            if tag in item_tags:
+                grouped_results[tag].append(result)
+                matched_any = True
+                break  # Only add to first matching tag group
+        
+        if not matched_any:
+            grouped_results['other'].append(result)
+    
+    # Remove empty groups
+    return {k: v for k, v in grouped_results.items() if v}
 
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
@@ -355,14 +425,14 @@ def analyze_missing_trackers():
         
         if not available_trackers:
             print("No trackers found in database that match TRACKER_MAPPING")
-            return []
+            return [], []
         
         print(f"Available trackers for cross-seeding: {', '.join(available_trackers)}")
         
-        # Get all torrents with their tracker lists and paths
+        # Get all torrents with their tracker lists, paths, and tags
         print("\nStep 2: Analyzing torrents and their tracker coverage...")
         cursor.execute("""
-            SELECT name, info_hash, save_path, trackers
+            SELECT name, info_hash, save_path, trackers, tags
             FROM client_searchee
             WHERE save_path IS NOT NULL 
             AND save_path != ''
@@ -377,23 +447,42 @@ def analyze_missing_trackers():
         
         if total_torrents == 0:
             print("No torrents with paths and trackers found")
-            return []
+            return [], []
         
         print(f"Found {total_torrents} torrents to analyze")
         
         results = []
         content_groups = defaultdict(list)  # Group by normalized name to handle duplicates
+        all_tags = set()  # Collect all tags found
         start_time = time.time()
         
         # Process each torrent
         for i, row in enumerate(torrent_rows):
             print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
             
-            name, info_hash, save_path, trackers_json = row
+            name, info_hash, save_path, trackers_json, tags_data = row
             
             # Only process video files
             if not is_video_file(name):
                 continue
+            
+            # Parse tags
+            item_tags = []
+            if tags_data:
+                try:
+                    if tags_data.startswith('[') and tags_data.endswith(']'):
+                        # JSON array format
+                        item_tags = json.loads(tags_data)
+                    else:
+                        # Single tag or comma-separated
+                        item_tags = [tag.strip() for tag in str(tags_data).split(',') if tag.strip()]
+                except (json.JSONDecodeError, AttributeError):
+                    # Try treating as plain text
+                    if tags_data:
+                        item_tags = [tag.strip() for tag in str(tags_data).split(',') if tag.strip()]
+            
+            # Add tags to our collection
+            all_tags.update(item_tags)
             
             try:
                 # Parse the trackers JSON - these are domain names that need mapping
@@ -405,13 +494,16 @@ def analyze_missing_trackers():
                     if domain in domain_to_abbrev:
                         found_trackers.add(domain_to_abbrev[domain])
                 
-                # Filter relevant trackers for this content - only consider available trackers
+                # Get all relevant trackers (no content filtering)
                 relevant_trackers = filter_relevant_trackers(available_trackers, name, available_trackers)
                 
-                # Find missing trackers
+                # Find missing trackers (relevant trackers not currently found)
                 missing_trackers = sorted(set(relevant_trackers) - found_trackers)
                 
-                if missing_trackers:
+                # Always include entries if they have found trackers on relevant trackers OR missing trackers
+                found_relevant_trackers = sorted(found_trackers & set(relevant_trackers))
+                
+                if missing_trackers or found_relevant_trackers:
                     # Group by normalized name to handle duplicates
                     normalized_name = normalize_content_name(name)
                     content_groups[normalized_name].append({
@@ -419,8 +511,9 @@ def analyze_missing_trackers():
                         'info_hash': info_hash,
                         'path': save_path,
                         'missing_trackers': missing_trackers,
-                        'found_trackers': sorted(found_trackers & set(relevant_trackers)),
-                        'normalized_name': normalized_name
+                        'found_trackers': found_relevant_trackers,
+                        'normalized_name': normalized_name,
+                        'tags': item_tags
                     })
                     
             except json.JSONDecodeError:
@@ -438,34 +531,37 @@ def analyze_missing_trackers():
                 continue
             
             if len(items) > 1:
-                # Handle duplicates - merge found trackers and use primary item
+                # Handle duplicates - merge found trackers and tags, use primary item
                 merged_found_trackers = set()
+                merged_tags = set()
                 for item in items:
                     merged_found_trackers.update(item['found_trackers'])
+                    merged_tags.update(item['tags'])
                 
-                # Use first item as primary and update its found trackers
+                # Use first item as primary and update its found trackers and tags
                 primary_item = items[0]
                 relevant_trackers = filter_relevant_trackers(available_trackers, primary_item['name'], available_trackers)
                 missing_trackers = sorted(set(relevant_trackers) - merged_found_trackers)
                 
-                if missing_trackers:
+                if missing_trackers or merged_found_trackers:
                     primary_item['missing_trackers'] = missing_trackers
                     primary_item['found_trackers'] = sorted(merged_found_trackers & set(relevant_trackers))
                     primary_item['duplicates'] = [item['name'] for item in items]
+                    primary_item['tags'] = sorted(merged_tags)
                     results.append(primary_item)
             else:
                 # Single item
-                if items[0]['missing_trackers']:
+                if items[0]['missing_trackers'] or items[0]['found_trackers']:
                     results.append(items[0])
             
             processed_content.add(normalized_name)
         
         conn.close()
-        return results
+        return results, sorted(all_tags)
         
     except Exception as e:
         print(f"Error analyzing missing trackers: {e}")
-        return []
+        return [], []
 
 def generate_upload_commands(results, output_file=None, clean_output=False):
     """Generate upload.py commands and save them to persistent appdata."""
@@ -495,7 +591,9 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
                 f.write(f"# {item['name']}\n")
                 if item.get('duplicates'):
                     f.write(f"# Duplicates: {', '.join(item['duplicates'])}\n")
-                f.write(f"# Missing from: {', '.join(item['missing_trackers'])}\n")
+                if item.get('tags'):
+                    f.write(f"# Tags: {', '.join(item['tags'])}\n")
+                f.write(f"# Missing from: {', '.join(item['missing_trackers']) if item['missing_trackers'] else 'None'}\n")
                 f.write(f"# Found on: {', '.join(item['found_trackers']) if item['found_trackers'] else 'None'}\n")
             
             # Construct the full file path by combining directory and filename
@@ -504,9 +602,12 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
             full_file_path = base_path / torrent_name
             
             # Create the tracker list parameter - only include missing trackers
-            tracker_list = ','.join(item['missing_trackers'])
+            if item['missing_trackers']:
+                tracker_list = ','.join(item['missing_trackers'])
+                f.write(f'python3 upload.py "{full_file_path}" --trackers {tracker_list}\n')
+            else:
+                f.write(f'# No missing trackers for: {full_file_path}\n')
             
-            f.write(f'python3 upload.py "{full_file_path}" --trackers {tracker_list}\n')
             if not clean_output:
                 f.write('\n')
     
@@ -577,6 +678,7 @@ def main():
     parser.add_argument('--no-emoji', action='store_true', help='Remove all emojis from output')
     parser.add_argument('--output-clean', action='store_true', help='Generate clean output with only upload commands')
     parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
+    parser.add_argument('--no-filter', action='store_true', help='Skip tag filtering prompt and show all results')
     
     args = parser.parse_args()
     
@@ -596,7 +698,7 @@ def main():
         print()
     
     print("Analyzing cross-seed database for missing torrents...")
-    results = analyze_missing_trackers()
+    results, all_tags = analyze_missing_trackers()
     
     if not results:
         print("No torrents found needing upload to additional trackers")
@@ -604,26 +706,47 @@ def main():
     
     print(f"Found {len(results)} video files needing upload to additional trackers")
     
+    # Handle tag filtering unless --no-filter is specified
+    selected_tags = None
+    grouped_results = {'all': results}
+    
+    if not args.no_filter and all_tags:
+        selected_tags = prompt_tag_filter(all_tags)
+        if selected_tags:
+            grouped_results = filter_results_by_tags(results, selected_tags)
+    
     # Display results unless clean output requested
     if not args.output_clean:
         print("\nMissing Video Files by Tracker:")
         print("=" * 80)
         
-        for item in sorted(results, key=lambda x: x['name'].lower()):
-            print(f"\n{item['name']}")
-            if item.get('duplicates'):
-                print(f"   Duplicates detected: {', '.join(item['duplicates'])}")
-            print(f"   Path: {item['path']}")
-            print(f"   Missing from: {', '.join(item['missing_trackers'])}")
-            if item['found_trackers']:
-                print(f"   Found on: {', '.join(item['found_trackers'])}")
-            else:
-                print(f"   Found on: None")
+        for group_name, group_results in grouped_results.items():
+            if len(grouped_results) > 1:  # Only show group headers if we have multiple groups
+                print(f"\n{'='*20} {group_name.upper()} CONTENT {'='*20}")
+                print(f"Found {len(group_results)} items in this category\n")
+            
+            for item in sorted(group_results, key=lambda x: x['name'].lower()):
+                print(f"\n{item['name']}")
+                if item.get('duplicates'):
+                    print(f"   Duplicates detected: {', '.join(item['duplicates'])}")
+                print(f"   Path: {item['path']}")
+                if item.get('tags'):
+                    print(f"   Tags: {', '.join(item['tags'])}")
+                print(f"   Missing from: {', '.join(item['missing_trackers']) if item['missing_trackers'] else 'None'}")
+                if item['found_trackers']:
+                    print(f"   Found on: {', '.join(item['found_trackers'])}")
+                else:
+                    print(f"   Found on: None")
     
     # Generate upload commands if requested
     if args.output is not None:
+        # Flatten grouped results for command generation
+        all_filtered_results = []
+        for group_results in grouped_results.values():
+            all_filtered_results.extend(group_results)
+        
         output_file = args.output if args.output != 'default' else None
-        commands_file = generate_upload_commands(results, output_file, args.output_clean)
+        commands_file = generate_upload_commands(all_filtered_results, output_file, args.output_clean)
         if not args.output_clean:
             print(f"\nUpload commands written to: {commands_file}")
             print("Review the file before executing upload commands")
