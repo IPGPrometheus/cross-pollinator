@@ -65,7 +65,7 @@ TRACKER_MAPPING = {
     'HDU': ['HDU', 'hd-united'],
     'HHD': ['HHD', 'homiehelpdesk'],
     'HPF': ['HPF', 'harrypotterfan'],
-    'HDS': ['HDS', ['hd-space.pw'],
+    'HDS': ['HDS', 'hd-space.pw'],
     'HUNO': ['HUNO', 'hawke', 'hawke.uno'],
     'iAnon': ['iAnon'],
     'IMS': ['IMS', 'immortalseed.me'],
