@@ -186,72 +186,43 @@ def normalize_tracker_name(raw_name):
     name = raw_name.strip()
     original_name = name  # Keep for debugging
     
-    # Handle full URLs first
     if name.startswith('https://'):
-        from urllib.parse import urlparse
-        try:
-            parsed = urlparse(name)
-            domain = parsed.netloc.lower()
-            
-            # Direct domain mappings
-            domain_mapping = {
-                'www.torrentleech.org': 'TL',
-                'tleechreload.org': 'TL',
-                'torrentleech.org': 'TL',
-                'blutopia.cc': 'BLU',
-                'beyond-hd.me': 'BHD',
-                'aither.cc': 'AITHER', 
-                'anthelion.me': 'ANT',
-                'hdbits.org': 'HDB',
-                'passthepopcorn.me': 'PTP',
-                'morethantv.me': 'MTV',
-                'hawke.uno': 'HUNO',
-                'lst.gg': 'LST',
-                'onlyencodes.cc': 'OE',
-                'cathode-ray.tube': 'CRT',
-                'signal.cathode-ray.tube': 'CRT',
-                'filelist.io': 'FL',
-                'reactor.filelist.io': 'FL',
-                'reactor.thefl.org': 'FL'
-            }
-            
-            if domain in domain_mapping:
-                return domain_mapping[domain]
-            
-            # Fallback patterns for partial matches
-            if 'torrentleech' in domain:
-                return 'TL'
-            elif 'blutopia' in domain:
-                return 'BLU'
-            elif 'beyond-hd' in domain:
-                return 'BHD'
-            elif 'aither' in domain:
-                return 'AITHER'
-            elif 'anthelion' in domain:
-                return 'ANT'
-            elif 'hawke' in domain:
-                return 'HUNO'
-            elif 'onlyencodes' in domain:
-                return 'OE'
-            elif 'lst.gg' in domain:
-                return 'LST'
-            elif 'filelist' in domain:
-                return 'FL'
-            elif 'cathode-ray' in domain:
-                return 'CRT'
-            
-            # If we can't match the domain, log it and return None
-            print(f"🔍 DEBUG: Could not normalize URL domain '{domain}' from '{original_name}'")
-            return None
-            
-        except Exception as e:
-            print(f"🔍 DEBUG: Error parsing URL '{original_name}': {e}")
-            return None
-    
-    # Handle non-URL cases
+        name = name[8:]
     if name.endswith(' (API)'):
         name = name[:-6]
     if name.startswith('FileList-'):
+        return 'FL'
+    
+    # Special handling for tracker URLs and variations (case-insensitive)
+    name_lower = name.lower()
+    
+    if 'tleechreload.org' in name_lower or 'torrentleech.org' in name_lower:
+        return 'TL'
+    if 'blutopia.cc' in name_lower or 'blutopia' in name_lower:
+        return 'BLU'
+    if 'beyond-hd.me' in name_lower or 'beyond-hd' in name_lower:
+        return 'BHD'
+    if 'aither.cc' in name_lower or 'aither' in name_lower:
+        return 'AITHER'
+    if 'anthelion.me' in name_lower or 'anthelion' in name_lower:
+        return 'ANT'
+    if 'hdbits.org' in name_lower or 'hdbits' in name_lower:
+        return 'HDB'
+    if 'passthepopcorn.me' in name_lower:
+        return 'PTP'
+    if 'morethantv.me' in name_lower or 'morethantv' in name_lower:
+        return 'MTV'
+    if 'cathode-ray.tube' in name_lower or 'signal.cathode-ray.tube' in name_lower:
+        return 'CRT'
+    if 'hawke' in name_lower:
+        return 'HUNO'
+    if 'lst' in name_lower and len(name) <= 5:  # Avoid false matches
+        return 'LST'
+    if 'onlyencodes' in name_lower:
+        return 'OE'
+    if 'oldtoons' in name_lower:
+        return 'OTW'
+    if 'filelist' in name_lower or 'reactor.filelist.io' in name_lower or 'reactor.thefl.org' in name_lower:
         return 'FL'
     
     # Check exact matches first, then case-insensitive
@@ -261,7 +232,7 @@ def normalize_tracker_name(raw_name):
         if name.lower() in [v.lower() for v in variants]:
             return abbrev
     
-    # Debug: Log unrecognized tracker names (but only for non-URLs)
+    # Debug: Log unrecognized tracker names
     print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{name}'")
     return None
 
@@ -364,7 +335,6 @@ def filter_relevant_trackers(all_trackers, filename, active_trackers):
         # For non-anime, exclude anime-specific trackers
         return sorted(relevant_trackers - ANIME_TRACKERS)
 
-
 def get_torrents_with_paths():
     """Get torrents with their file paths and missing trackers."""
     try:
@@ -381,9 +351,9 @@ def get_torrents_with_paths():
         print("📊 Analyzing torrents and their tracker status...")
         start_time = time.time()
         
-        # Get torrents with paths and tracker info
+        # Get torrents with paths
         cursor.execute("""
-            SELECT name, info_hash, save_path, tracker
+            SELECT name, info_hash, save_path
             FROM client_searchee
             WHERE save_path IS NOT NULL AND save_path != ''
             ORDER BY name
@@ -402,15 +372,15 @@ def get_torrents_with_paths():
         # Process torrents with progress bar
         for i, row in enumerate(torrent_rows):
             print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
-            name, info_hash, save_path, tracker = row
+            name, info_hash, save_path = row
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
             info_hash_to_name[info_hash] = name
         
         print()  # New line after progress bar
         
-        # Cross-reference decisions with client_searchee to get actual tracker info
-        print("🔄 Cross-referencing decisions with tracker info...")
+        # Cross-reference successful decisions with client_searchee tracker info
+        print("🔄 Cross-referencing successful decisions with tracker info...")
         cursor.execute("""
             SELECT DISTINCT d.info_hash, cs.tracker
             FROM decision d
@@ -426,83 +396,59 @@ def get_torrents_with_paths():
         # Process cross-referenced data with progress bar
         cross_ref_start = time.time()
         debug_tracker_matches = defaultdict(int)  # Debug: count successful tracker matches
+        unmatched_domains = set()  # Track unmatched domains for debugging
         
         for i, row in enumerate(cross_ref_rows):
             if i % 100 == 0 or i == total_cross_refs - 1:  # Update every 100 items or at the end
                 print_progress_bar(i + 1, total_cross_refs, cross_ref_start, "Cross-referencing trackers")
             
-            info_hash, tracker = row
+            info_hash, tracker_url = row
             
             # Look up torrent name by info_hash
             if info_hash in info_hash_to_name:
                 torrent_name = info_hash_to_name[info_hash]
                 
-                # Extract tracker name from URL or use as-is
-                normalized_tracker = None
-                if tracker.startswith('http'):
-                    # Extract domain from URL
-                    from urllib.parse import urlparse
+                # Extract domain from tracker URL
+                if tracker_url.startswith('http'):
                     try:
-                        parsed = urlparse(tracker)
+                        from urllib.parse import urlparse
+                        parsed = urlparse(tracker_url)
                         domain = parsed.netloc.lower()
                         
-                        # Map common domains to tracker names
-                        domain_mapping = {
-                            'www.torrentleech.org': 'TL',
-                            'tleechreload.org': 'TL',
-                            'torrentleech.org': 'TL',
-                            'blutopia.cc': 'BLU',
-                            'beyond-hd.me': 'BHD', 
-                            'aither.cc': 'AITHER',
-                            'anthelion.me': 'ANT',
-                            'hdbits.org': 'HDB',
-                            'passthepopcorn.me': 'PTP',
-                            'morethantv.me': 'MTV',
-                            'hawke.uno': 'HUNO',
-                            'lst.gg': 'LST',
-                            'onlyencodes.cc': 'OE',
-                            'cathode-ray.tube': 'CRT',
-                            'signal.cathode-ray.tube': 'CRT',
-                            'filelist.io': 'FL',
-                            'reactor.filelist.io': 'FL',
-                            'reactor.thefl.org': 'FL'
-                        }
+                        # Find matching tracker in TRACKER_MAPPING
+                        found_tracker = None
+                        for abbrev, variants in TRACKER_MAPPING.items():
+                            # Check if domain matches any variant (case-insensitive)
+                            for variant in variants:
+                                if variant.lower() in domain or domain in variant.lower():
+                                    found_tracker = abbrev
+                                    break
+                            if found_tracker:
+                                break
                         
-                        if domain in domain_mapping:
-                            normalized_tracker = domain_mapping[domain]
+                        if found_tracker:
+                            name_to_info[torrent_name]['found_trackers'].add(found_tracker)
+                            debug_tracker_matches[found_tracker] += 1
                         else:
-                            # Fallback patterns for partial matches
-                            if 'torrentleech' in domain:
-                                normalized_tracker = 'TL'
-                            elif 'blutopia' in domain:
-                                normalized_tracker = 'BLU'
-                            elif 'beyond-hd' in domain:
-                                normalized_tracker = 'BHD'
-                            elif 'aither' in domain:
-                                normalized_tracker = 'AITHER'
-                            elif 'anthelion' in domain:
-                                normalized_tracker = 'ANT'
-                            elif 'hawke' in domain:
-                                normalized_tracker = 'HUNO'
-                            elif 'onlyencodes' in domain:
-                                normalized_tracker = 'OE'
-                            elif 'lst' in domain:
-                                normalized_tracker = 'LST'
-                            elif 'filelist' in domain:
-                                normalized_tracker = 'FL'
-                            elif 'cathode-ray' in domain:
-                                normalized_tracker = 'CRT'
-                        
+                            # Track unmatched domains for debugging
+                            unmatched_domains.add(domain)
+                            
                     except Exception as e:
-                        print(f"Error parsing tracker URL {tracker}: {e}")
+                        print(f"Error parsing tracker URL {tracker_url}: {e}")
                         continue
                 else:
-                    # Direct tracker name - try to normalize it
-                    normalized_tracker = normalize_tracker_name(tracker)
-                
-                if normalized_tracker:
-                    name_to_info[torrent_name]['found_trackers'].add(normalized_tracker)
-                    debug_tracker_matches[normalized_tracker] += 1
+                    # Non-URL tracker name - try direct mapping
+                    found_tracker = None
+                    for abbrev, variants in TRACKER_MAPPING.items():
+                        if tracker_url in variants or tracker_url.lower() in [v.lower() for v in variants]:
+                            found_tracker = abbrev
+                            break
+                    
+                    if found_tracker:
+                        name_to_info[torrent_name]['found_trackers'].add(found_tracker)
+                        debug_tracker_matches[found_tracker] += 1
+                    else:
+                        unmatched_domains.add(tracker_url)
         
         print()  # New line after progress bar
         
@@ -513,20 +459,12 @@ def get_torrents_with_paths():
                 print(f"   {tracker}: {count} matches")
         else:
             print("⚠️  Debug - No tracker matches found from cross-reference!")
-            
-            # Check what trackers are actually in client_searchee
-            cursor.execute("""
-                SELECT DISTINCT tracker, COUNT(*) as count 
-                FROM client_searchee 
-                WHERE tracker IS NOT NULL AND tracker != '' 
-                GROUP BY tracker 
-                ORDER BY count DESC 
-                LIMIT 10
-            """)
-            sample_trackers = cursor.fetchall()
-            print("   Sample trackers in client_searchee:")
-            for tracker, count in sample_trackers:
-                print(f"     {tracker}: {count}")
+        
+        # Show unmatched domains for debugging (limit to first 10)
+        if unmatched_domains:
+            print(f"🔍 Debug - Unmatched domains/trackers (showing first 10):")
+            for domain in sorted(list(unmatched_domains)[:10]):
+                print(f"   {domain}")
         
         print()  # New line after debug output
         
@@ -713,6 +651,19 @@ def debug_database_content(limit=10):
                     normalized = normalize_tracker_name(tracker_name)
                     f.write(f"  {guid} ({normalized}) - {decision}: {count}\n")
             
+            # Sample tracker URLs from client_searchee
+            f.write(f"\nSample tracker URLs from client_searchee (first {limit}):\n")
+            cursor.execute("""
+                SELECT DISTINCT tracker, COUNT(*) as count 
+                FROM client_searchee 
+                WHERE tracker IS NOT NULL AND tracker != '' 
+                GROUP BY tracker 
+                ORDER BY count DESC 
+                LIMIT ?
+            """, (limit,))
+            for tracker, count in cursor.fetchall():
+                f.write(f"  {tracker}: {count}\n")
+            
             f.write("=" * 50 + "\n")
         
         conn.close()
@@ -720,7 +671,7 @@ def debug_database_content(limit=10):
         
     except Exception as e:
         print(f"Error in debug function: {e}")
-        
+
 def main():
     parser = argparse.ArgumentParser(
         description= "Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change titling, add -tmdb TV/number or -tmdb movie/number or -tvdb number"
