@@ -11,6 +11,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 import re
 import time
 
@@ -193,52 +194,57 @@ def normalize_tracker_name(raw_name):
     # Strip protocol and www
     name = re.sub(r'^(https?:\/\/)?(www\.)?', '', name, flags=re.IGNORECASE)
 
-    # Keep only up to the 3rd "/"
-    parts = name.split('/')
-    if len(parts) > 3:
-        name = '/'.join(parts[:3])
+    # If it's a URL, extract domain only
+    parsed = urlparse("http://" + name)  # Add scheme so urlparse works
+    host = parsed.hostname or name
+    # Take only the first two parts of domain (handles subdomains)
+    parts = host.split('.')
+    if len(parts) > 2:
+        # e.g. signal.cathode-ray.tube -> cathode-ray
+        core = parts[-2]
+    else:
+        core = parts[0]
+
+    # Normalize just to the base keyword
+    name = core.lower()
 
     # Remove trailing ' (API)'
-    if name.endswith(' (API)'):
+    if name.endswith(' (api)'):
         name = name[:-6]
 
     # Case-insensitive comparisons
-    name_lower = name.lower()
-
-    if 'tleechreload.org' in name_lower or 'torrentleech.org' in name_lower:
+    if 'torrentleech' in name:
         return 'TL'
-    if 'blutopia.cc' in name_lower or 'blutopia' in name_lower:
+    if 'blutopia' in name:
         return 'BLU'
-    if 'beyond-hd.me' in name_lower or 'beyond-hd' in name_lower:
+    if 'beyond-hd' in name:
         return 'BHD'
-    if 'aither.cc' in name_lower or 'aither' in name_lower:
+    if 'aither' in name:
         return 'AITHER'
-    if 'anthelion.me' in name_lower or 'anthelion' in name_lower:
+    if 'anthelion' in name:
         return 'ANT'
-    if 'hdbits.org' in name_lower or 'hdbits' in name_lower:
+    if 'hdbits' in name:
         return 'HDB'
-    if 'passthepopcorn.me' in name_lower:
+    if 'passthepopcorn' in name:
         return 'PTP'
-    if 'morethantv.me' in name_lower or 'morethantv' in name_lower:
+    if 'morethantv' in name:
         return 'MTV'
-    if 'cathode-ray.tube' in name_lower or 'signal.cathode-ray.tube' in name_lower:
+    if 'cathode-ray' in name:
         return 'CRT'
-    if 'hawke' in name_lower:
+    if 'hawke' in name:
         return 'HUNO'
-    if 'lst' in name_lower and len(name) <= 5:  # Avoid false matches
+    if 'lst' in name and len(name) <= 5:  # Avoid false matches
         return 'LST'
-    if 'onlyencodes' in name_lower:
+    if 'onlyencodes' in name:
         return 'OE'
-    if 'oldtoons' in name_lower:
+    if 'oldtoons' in name:
         return 'OTW'
-    if 'filelist' in name_lower or 'reactor.filelist.io' in name_lower or 'reactor.thefl.org' in name_lower:
+    if 'filelist' in name or 'reactor' in name:
         return 'FL'
 
     # Check against TRACKER_MAPPING
     for abbrev, variants in TRACKER_MAPPING.items():
-        if name in variants:
-            return abbrev
-        if name.lower() in [v.lower() for v in variants]:
+        if name in [v.lower() for v in variants]:
             return abbrev
 
     # Debug logging
