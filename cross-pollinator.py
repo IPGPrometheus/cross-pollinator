@@ -11,7 +11,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
-import time
+import re
 
 # Configuration
 CROSS_SEED_DIR = "/cross-seed"
@@ -59,7 +59,7 @@ TRACKER_MAPPING = {
     'RTF': ['RTF', 'retroflix'],
     'SAM': ['SAM', 'samaritano'],
     'SN': ['SN', 'swarmazon'],
-    'SP': ['SP', 'seedpool'],  # Added SeedPool mapping
+    'SP': ['SP', 'seedpool']
     'STC': ['STC', 'skipthecommericals'],
     'THR': ['THR', 'torrenthr'],
     'TIK': ['TIK', 'cinematik'],
@@ -72,6 +72,12 @@ TRACKER_MAPPING = {
     'YUS': ['YUS', 'yu-scene']
 }
 
+# Anime-specific trackers that should only be considered for anime content
+ANIME_TRACKERS = {'AL', 'ACM'}
+
+# General movie/TV trackers that should be excluded from anime content
+GENERAL_TRACKERS = {'PTP', 'HDB', 'BLU', 'BHD', 'AITHER', 'ANT', 'MTV', 'FL', 'TL'}
+
 SUCCESS_DECISIONS = ['MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS']
 
 def is_video_file(filename):
@@ -83,122 +89,258 @@ def is_video_file(filename):
     }
     return Path(filename).suffix.lower() in video_extensions
 
-def show_progress_bar(current, total, start_time, bar_length=50):
-    """Display a simple progress bar with time estimates."""
-    if total == 0:
-        return
+def is_anime_content(filename):
+    """Detect if content is likely anime based on filename patterns."""
+    filename_lower = filename.lower()
     
-    elapsed = time.time() - start_time
-    progress = current / total
-    eta = (elapsed / progress) - elapsed if progress > 0 else 0
+    # Common anime patterns
+    anime_indicators = [
+        # Episode patterns
+        r's\d{2}e\d{2}',  # S01E01 format
+        r'ep\d+',         # Episode number
+        r'episode\s*\d+', # Episode word + number
+        
+        # Japanese/anime specific terms
+        'anime', 'manga', 'ova', 'ona', 'special', 'omake',
+        
+        # Common anime groups/tags
+        'horriblesubs', 'subsplease', 'erai-raws', 'commie',
+        
+        # Language indicators
+        'japanese', 'jpn', 'subbed', 'dubbed'
+    ]
     
-    # Create the bar
-    filled = int(bar_length * progress)
-    bar = '█' * filled + '░' * (bar_length - filled)
+    for pattern in anime_indicators:
+        if re.search(pattern, filename_lower):
+            return True
     
-    # Format time
-    elapsed_str = f"{elapsed:.1f}s"
-    eta_str = f"{eta:.1f}s" if eta > 0 else "0.0s"
-    
-    # Print the progress bar
-    print(f"\r[{bar}] {current}/{total} ({progress*100:.1f}%) | Elapsed: {elapsed_str} | ETA: {eta_str}", end='', flush=True)
-    
-    # Print newline when complete
-    if current == total:
-        print()
+    # Check for common anime series patterns (often have Japanese romanized names)
+    # This is basic - could be expanded with a more comprehensive approach
+    return False
 
-def extract_abbrevs_from_text(text: str) -> set:
-    """Return set of tracker abbreviations whose variants appear in given text."""
-    if not text:
-        return set()
-    s = str(text).lower()
-    found = set()
+def normalize_tracker_name(raw_name):
+    """Normalize tracker names to standard abbreviations."""
+    name = raw_name.strip()
+    
+    if name.startswith('https://'):
+        name = name[8:]
+    if name.endswith(' (API)'):
+        name = name[:-6]
+    if name.startswith('FileList-'):
+        return 'FL'
+    
     for abbrev, variants in TRACKER_MAPPING.items():
-        if any(v.lower() in s for v in variants):
-            found.add(abbrev)
-    return found
+        if name in variants or name.lower() in [v.lower() for v in variants]:
+            return abbrev
+    
+    return None
 
-def get_configured_trackers(cursor) -> set:
-    """
-    Scan the entire client_searchee.trackers column and build the global set
-    of trackers that actually exist in this DB (to avoid returning trackers
-    you don't have in UA).
-    """
-    configured = set()
-    cursor.execute("SELECT trackers FROM client_searchee")
-    for (trackers_text,) in cursor.fetchall():
-        configured |= extract_abbrevs_from_text(trackers_text)
-    return configured
+def normalize_content_name(filename):
+    """Normalize content name for duplicate detection."""
+    # Remove file extension
+    name = Path(filename).stem
+    
+    # Remove common quality/format indicators
+    quality_patterns = [
+        r'\.\d{3,4}p\.',  # .1080p., .720p., etc.
+        r'\.BluRay\.',
+        r'\.WEB-DL\.',
+        r'\.WEBRip\.',
+        r'\.BDRip\.',
+        r'\.DVDRip\.',
+        r'\.AMZN\.',
+        r'\.FLUX\.',
+        r'\.ATMOS\.',
+        r'\.DDP\d+\.\d+\.',  # .DDP5.1.
+        r'\.H\.264-',
+        r'\.x264-',
+        r'\.x265-',
+        r'-[A-Z0-9]+$',  # Release group at end
+    ]
+    
+    normalized = name
+    for pattern in quality_patterns:
+        normalized = re.sub(pattern, '.', normalized, flags=re.IGNORECASE)
+    
+    # Clean up multiple dots and normalize
+    normalized = re.sub(r'\.+', '.', normalized)
+    normalized = normalized.strip('.')
+    
+    return normalized.lower()
 
-def get_torrents_with_paths():
-    """Get torrents with their file paths and missing trackers using direct string search."""
+def get_active_trackers():
+    """Get trackers that you actually have successful uploads/downloads on."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-
-        print("📊 Getting torrents with paths and performing tracker string search...")
-        start_time = time.time()
-
-        # Build the GLOBAL configured tracker set from the DB
-        configured_trackers = get_configured_trackers(cursor)
-        if not configured_trackers:
-            print("No configured trackers detected in the DB (client_searchee.trackers).")
-            conn.close()
-            return []
-
-        # Get torrents with paths and trackers column
+        
+        # Get trackers where you have successful matches (indicating you're active on them)
         cursor.execute("""
-            SELECT name, info_hash, save_path, trackers
+            SELECT DISTINCT guid 
+            FROM decision 
+            WHERE decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
+            AND guid IS NOT NULL
+        """)
+        
+        active_trackers = set()
+        for row in cursor.fetchall():
+            guid = row[0]
+            tracker_name = guid.split('.')[0] if '.' in guid else guid
+            normalized = normalize_tracker_name(tracker_name)
+            if normalized:
+                active_trackers.add(normalized)
+        
+        conn.close()
+        return sorted(active_trackers)
+        
+    except Exception as e:
+        print(f"Error getting active trackers: {e}")
+        return []
+
+def get_all_configured_trackers():
+    """Get all configured trackers from database decisions."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL")
+        trackers = set()
+        
+        for row in cursor.fetchall():
+            guid = row[0]
+            tracker_name = guid.split('.')[0] if '.' in guid else guid
+            normalized = normalize_tracker_name(tracker_name)
+            if normalized:
+                trackers.add(normalized)
+        
+        conn.close()
+        return sorted(trackers)
+        
+    except Exception as e:
+        print(f"Error getting configured trackers: {e}")
+        return []
+
+def filter_relevant_trackers(all_trackers, filename, active_trackers):
+    """Filter trackers based on content type and user's active trackers."""
+    is_anime = is_anime_content(filename)
+    
+    # Only consider trackers you're actually active on
+    relevant_trackers = set(all_trackers) & set(active_trackers)
+    
+    if is_anime:
+        # For anime, include anime trackers and exclude general movie/TV trackers
+        return sorted(relevant_trackers & (ANIME_TRACKERS | (relevant_trackers - GENERAL_TRACKERS)))
+    else:
+        # For non-anime, exclude anime-specific trackers
+        return sorted(relevant_trackers - ANIME_TRACKERS)
+
+def get_torrents_with_paths():
+    """Get torrents with their file paths and missing trackers."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        all_trackers = get_all_configured_trackers()
+        active_trackers = get_active_trackers()
+        
+        if not all_trackers:
+            return []
+        
+        # Get torrents with paths
+        cursor.execute("""
+            SELECT name, info_hash, save_path
             FROM client_searchee
             WHERE save_path IS NOT NULL AND save_path != ''
             ORDER BY name
         """)
-        torrents_data = cursor.fetchall()
-        total_torrents = len(torrents_data)
-
-        print(f"Processing {total_torrents} torrents with direct string search...")
-
-        # Group by torrent name
-        grouped = defaultdict(lambda: {
-            "paths": set(),
-            "found_trackers": set(),
-        })
-
-        for i, (name, info_hash, save_path, trackers_text) in enumerate(torrents_data, 1):
-            if not is_video_file(name):
+        
+        name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set()})
+        for row in cursor.fetchall():
+            name, info_hash, save_path = row
+            name_to_info[name]['info_hashes'].add(info_hash)
+            name_to_info[name]['paths'].add(save_path)
+        
+        # Get latest decisions for each tracker/info_hash
+        cursor.execute("""
+            SELECT cs.info_hash, d.guid, d.decision, cs.name
+            FROM client_searchee cs
+            JOIN decision d ON cs.info_hash = d.info_hash
+            WHERE d.last_seen = (
+                SELECT MAX(d2.last_seen)
+                FROM decision d2
+                WHERE d2.info_hash = d.info_hash 
+                AND d2.guid = d.guid
+            )
+        """)
+        
+        # Map decisions to torrents
+        for row in cursor.fetchall():
+            info_hash, guid, decision, torrent_name = row
+            tracker_name = guid.split('.')[0] if '.' in guid else guid
+            normalized = normalize_tracker_name(tracker_name)
+            if not normalized:
                 continue
-
-            # Track one path per torrent (just keep them all for safety)
-            grouped[name]["paths"].add(save_path)
-
-            # Track all found trackers across rows
-            found_here = extract_abbrevs_from_text(trackers_text)
-            grouped[name]["found_trackers"].update(found_here)
-
-            # Progress bar
-            if i % 25 == 0 or i == total_torrents:
-                show_progress_bar(i, total_torrents, start_time)
-
+                
+            for name, info in name_to_info.items():
+                if info_hash in info['info_hashes']:
+                    if decision in SUCCESS_DECISIONS:
+                        info['found_trackers'].add(normalized)
+                    break
+        
+        # Group by normalized content name to detect duplicates
+        content_groups = defaultdict(list)
+        for name, info in name_to_info.items():
+            if is_video_file(name):
+                normalized_name = normalize_content_name(name)
+                content_groups[normalized_name].append((name, info))
+        
+        # Build results with missing trackers
         results = []
-        for name, data in grouped.items():
-            found_trackers = data["found_trackers"]
-            missing_trackers = sorted(configured_trackers - found_trackers)
-
-            if missing_trackers:
+        processed_content = set()
+        
+        for normalized_name, items in content_groups.items():
+            if normalized_name in processed_content:
+                continue
+            
+            # For duplicate content, merge the found_trackers and use the first item
+            if len(items) > 1:
+                # Merge found trackers from all variants
+                merged_found_trackers = set()
+                primary_item = items[0]  # Use first item as primary
+                
+                for name, info in items:
+                    merged_found_trackers.update(info['found_trackers'])
+                
+                # Update primary item with merged trackers
+                primary_item[1]['found_trackers'] = merged_found_trackers
+                name, info = primary_item
+            else:
+                name, info = items[0]
+            
+            # Filter trackers based on content type and active trackers
+            relevant_trackers = filter_relevant_trackers(all_trackers, name, active_trackers)
+            missing_trackers = sorted(set(relevant_trackers) - info['found_trackers'])
+            
+            if missing_trackers and info['paths']:
+                # Use the first available path
+                file_path = list(info['paths'])[0]
                 results.append({
-                    "name": name,
-                    "path": next(iter(data["paths"])),  # pick first available path
-                    "missing_trackers": missing_trackers,
-                    "found_trackers": sorted(found_trackers),
+                    'name': name,
+                    'path': file_path,
+                    'missing_trackers': missing_trackers,
+                    'found_trackers': sorted(info['found_trackers'] & set(relevant_trackers)),
+                    'normalized_name': normalized_name,
+                    'duplicates': [item[0] for item in items] if len(items) > 1 else None
                 })
-
+            
+            processed_content.add(normalized_name)
+        
         conn.close()
         return results
-
+        
     except Exception as e:
         print(f"Error getting torrents with paths: {e}")
         return []
-
 
 def generate_upload_commands(results, output_file=None, clean_output=False):
     """Generate upload.py commands and save them to persistent appdata."""
@@ -216,12 +358,14 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     
     with open(filename, 'w') as f:
         if not clean_output:
-            f.write(f"# Cross-Pollinator: Generated {datetime.now()}\n")
-            f.write(f"# Total files needing upload: {len(results)}\n Note this is a build line for existing torrents on trackers. \n If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number \n\n")
+            f.write(f"# UAhelper: Generated {datetime.now()}\n")
+            f.write(f"# Total files needing upload: {len(results)}\n\n")
         
         for item in sorted(results, key=lambda x: x['name'].lower()):
             if not clean_output:
                 f.write(f"# {item['name']}\n")
+                if item.get('duplicates'):
+                    f.write(f"# Duplicates: {', '.join(item['duplicates'])}\n")
                 f.write(f"# Missing from: {', '.join(item['missing_trackers'])}\n")
                 f.write(f"# Found on: {', '.join(item['found_trackers']) if item['found_trackers'] else 'None'}\n")
             
@@ -232,7 +376,7 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
             # Construct full path: directory + torrent name
             full_file_path = base_path / torrent_name
             
-            # Create the tracker list parameter
+            # Create the tracker list parameter - only include missing trackers
             tracker_list = ','.join(item['missing_trackers'])
             
             f.write(f'python3 upload.py "{full_file_path}" --trackers {tracker_list}\n')
@@ -244,7 +388,7 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description= "Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number"
+        description= "Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change titling, add -tmdb TV/number or -tmdb movie/number or -tvdb number"
     )
     parser.add_argument('--run', action='store_true', help='Run analysis and show missing torrents')
     parser.add_argument('--output', nargs='?', const='default', help='Generate upload commands file (optional filename)')
@@ -286,6 +430,8 @@ def main():
         for item in sorted(results, key=lambda x: x['name'].lower()):
             if args.no_emoji:
                 print(f"\n{item['name']}")
+                if item.get('duplicates'):
+                    print(f"   Duplicates detected: {', '.join(item['duplicates'])}")
                 print(f"   Path: {item['path']}")
                 print(f"   Missing from: {', '.join(item['missing_trackers'])}")
                 if item['found_trackers']:
@@ -294,6 +440,8 @@ def main():
                     print(f"   Found on: None")
             else:
                 print(f"\n🎬️  {item['name']}")
+                if item.get('duplicates'):
+                    print(f"   🔄 Duplicates detected: {', '.join(item['duplicates'])}")
                 print(f"   📁 Path: {item['path']}")
                 print(f"   ❌ Missing from: {', '.join(item['missing_trackers'])}")
                 if item['found_trackers']:
