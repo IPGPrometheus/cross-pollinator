@@ -29,7 +29,7 @@ LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
 # Comprehensive tracker mapping - Updated with exact domain matches first
 TRACKER_MAPPING = {
     'ACM': ['ACM', 'eiga'],
-    'AT': ['AT', 'animetorrents.me']
+    'AT': ['AT', 'animetorrents.me'],
     'ABT': ['ABT', 'tracker.animebytes.tv'],
     'AITHER': ['AITHER', 'aither', 'aither.cc'], 
     'AL': ['AL', 'animelovers'],
