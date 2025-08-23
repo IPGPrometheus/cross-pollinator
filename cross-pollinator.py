@@ -364,6 +364,7 @@ def filter_relevant_trackers(all_trackers, filename, active_trackers):
         # For non-anime, exclude anime-specific trackers
         return sorted(relevant_trackers - ANIME_TRACKERS)
 
+
 def get_torrents_with_paths():
     """Get torrents with their file paths and missing trackers."""
     try:
@@ -380,7 +381,7 @@ def get_torrents_with_paths():
         print("📊 Analyzing torrents and their tracker status...")
         start_time = time.time()
         
-        # Get torrents with paths - also get tracker info from client_searchee
+        # Get torrents with paths and tracker info
         cursor.execute("""
             SELECT name, info_hash, save_path, tracker
             FROM client_searchee
@@ -405,124 +406,127 @@ def get_torrents_with_paths():
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
             info_hash_to_name[info_hash] = name
-            
-            # Add tracker from client_searchee if available
-            if tracker:
-                # Extract tracker name from URL or use as-is
-                if tracker.startswith('http'):
-                    # Extract domain from URL
-                    from urllib.parse import urlparse
-                    parsed = urlparse(tracker)
-                    tracker_domain = parsed.netloc.lower()
-                    
-                    # Map common domains to tracker names
-                    domain_mapping = {
-                        'blutopia.cc': 'BLU',
-                        'beyond-hd.me': 'BHD', 
-                        'aither.cc': 'AITHER',
-                        'anthelion.me': 'ANT',
-                        'hdbits.org': 'HDB',
-                        'passthepopcorn.me': 'PTP',
-                        'morethantv.me': 'MTV',
-                        'torrentleech.org': 'TL',
-                        'tleechreload.org': 'TL',
-                        'filelist.io': 'FL',
-                        'cathode-ray.tube': 'CRT'
-                    }
-                    
-                    normalized_tracker = None
-                    for domain, tracker_abbrev in domain_mapping.items():
-                        if domain in tracker_domain:
-                            normalized_tracker = tracker_abbrev
-                            break
-                    
-                    if not normalized_tracker:
-                        # Try to extract from subdomain or path
-                        if 'blutopia' in tracker_domain:
-                            normalized_tracker = 'BLU'
-                        elif 'beyond-hd' in tracker_domain:
-                            normalized_tracker = 'BHD'
-                        # Add more fallback patterns as needed
-                    
-                    if normalized_tracker:
-                        name_to_info[name]['found_trackers'].add(normalized_tracker)
-                else:
-                    # Direct tracker name
-                    normalized = normalize_tracker_name(tracker)
-                    if normalized:
-                        name_to_info[name]['found_trackers'].add(normalized)
         
         print()  # New line after progress bar
         
-        # Get all decisions with better tracker matching
-        print("🔄 Analyzing tracker decisions...")
+        # Cross-reference decisions with client_searchee to get actual tracker info
+        print("🔄 Cross-referencing decisions with tracker info...")
         cursor.execute("""
-            SELECT info_hash, guid, decision, last_seen
-            FROM decision
-            WHERE guid IS NOT NULL
-            ORDER BY info_hash, guid, last_seen DESC
+            SELECT DISTINCT d.info_hash, cs.tracker
+            FROM decision d
+            JOIN client_searchee cs ON d.info_hash = cs.info_hash
+            WHERE d.decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
+            AND cs.tracker IS NOT NULL
+            AND cs.tracker != ''
         """)
         
-        decision_rows = cursor.fetchall()
-        total_decisions = len(decision_rows)
+        cross_ref_rows = cursor.fetchall()
+        total_cross_refs = len(cross_ref_rows)
         
-        # Process decisions with progress bar - keep only latest decision per info_hash/guid pair
-        decision_start = time.time()
-        processed_pairs = set()  # Track processed (info_hash, guid) pairs
+        # Process cross-referenced data with progress bar
+        cross_ref_start = time.time()
         debug_tracker_matches = defaultdict(int)  # Debug: count successful tracker matches
         
-        for i, row in enumerate(decision_rows):
-            if i % 100 == 0 or i == total_decisions - 1:  # Update every 100 decisions or at the end
-                print_progress_bar(i + 1, total_decisions, decision_start, "Processing decisions")
+        for i, row in enumerate(cross_ref_rows):
+            if i % 100 == 0 or i == total_cross_refs - 1:  # Update every 100 items or at the end
+                print_progress_bar(i + 1, total_cross_refs, cross_ref_start, "Cross-referencing trackers")
             
-            info_hash, guid, decision, last_seen = row
-            pair_key = (info_hash, guid)
-            
-            # Skip if we've already processed this info_hash/tracker combination (keeps latest due to ORDER BY)
-            if pair_key in processed_pairs:
-                continue
-            processed_pairs.add(pair_key)
-            
-            # Extract and normalize tracker name from guid
-            if '.' in guid:
-                tracker_name = guid.split('.')[0]
-            else:
-                tracker_name = guid
-                
-            normalized = normalize_tracker_name(tracker_name)
-            
-            if not normalized:
-                continue
+            info_hash, tracker = row
             
             # Look up torrent name by info_hash
-            if info_hash in info_hash_to_name and decision in SUCCESS_DECISIONS:
+            if info_hash in info_hash_to_name:
                 torrent_name = info_hash_to_name[info_hash]
-                name_to_info[torrent_name]['found_trackers'].add(normalized)
-                debug_tracker_matches[normalized] += 1
+                
+                # Extract tracker name from URL or use as-is
+                normalized_tracker = None
+                if tracker.startswith('http'):
+                    # Extract domain from URL
+                    from urllib.parse import urlparse
+                    try:
+                        parsed = urlparse(tracker)
+                        domain = parsed.netloc.lower()
+                        
+                        # Map common domains to tracker names
+                        domain_mapping = {
+                            'www.torrentleech.org': 'TL',
+                            'tleechreload.org': 'TL',
+                            'torrentleech.org': 'TL',
+                            'blutopia.cc': 'BLU',
+                            'beyond-hd.me': 'BHD', 
+                            'aither.cc': 'AITHER',
+                            'anthelion.me': 'ANT',
+                            'hdbits.org': 'HDB',
+                            'passthepopcorn.me': 'PTP',
+                            'morethantv.me': 'MTV',
+                            'hawke.uno': 'HUNO',
+                            'lst.gg': 'LST',
+                            'onlyencodes.cc': 'OE',
+                            'cathode-ray.tube': 'CRT',
+                            'signal.cathode-ray.tube': 'CRT',
+                            'filelist.io': 'FL',
+                            'reactor.filelist.io': 'FL',
+                            'reactor.thefl.org': 'FL'
+                        }
+                        
+                        if domain in domain_mapping:
+                            normalized_tracker = domain_mapping[domain]
+                        else:
+                            # Fallback patterns for partial matches
+                            if 'torrentleech' in domain:
+                                normalized_tracker = 'TL'
+                            elif 'blutopia' in domain:
+                                normalized_tracker = 'BLU'
+                            elif 'beyond-hd' in domain:
+                                normalized_tracker = 'BHD'
+                            elif 'aither' in domain:
+                                normalized_tracker = 'AITHER'
+                            elif 'anthelion' in domain:
+                                normalized_tracker = 'ANT'
+                            elif 'hawke' in domain:
+                                normalized_tracker = 'HUNO'
+                            elif 'onlyencodes' in domain:
+                                normalized_tracker = 'OE'
+                            elif 'lst' in domain:
+                                normalized_tracker = 'LST'
+                            elif 'filelist' in domain:
+                                normalized_tracker = 'FL'
+                            elif 'cathode-ray' in domain:
+                                normalized_tracker = 'CRT'
+                        
+                    except Exception as e:
+                        print(f"Error parsing tracker URL {tracker}: {e}")
+                        continue
+                else:
+                    # Direct tracker name - try to normalize it
+                    normalized_tracker = normalize_tracker_name(tracker)
+                
+                if normalized_tracker:
+                    name_to_info[torrent_name]['found_trackers'].add(normalized_tracker)
+                    debug_tracker_matches[normalized_tracker] += 1
         
         print()  # New line after progress bar
         
         # Debug output: show tracker match counts
         if debug_tracker_matches:
-            print("🔍 Debug - Successful tracker matches found:")
+            print("🔍 Debug - Tracker matches from cross-reference:")
             for tracker, count in sorted(debug_tracker_matches.items()):
                 print(f"   {tracker}: {count} matches")
         else:
-            print("⚠️  Debug - No successful tracker matches found!")
+            print("⚠️  Debug - No tracker matches found from cross-reference!")
             
-            # Let's check what's in the decision table
-            cursor.execute("SELECT DISTINCT decision FROM decision LIMIT 10")
-            decisions = [row[0] for row in cursor.fetchall()]
-            print(f"   Available decision types: {', '.join(decisions)}")
-            
-            cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL LIMIT 10")
-            guids = [row[0] for row in cursor.fetchall()]
-            print(f"   Sample GUIDs: {', '.join(guids[:5])}")
-            
-            # Check if any decisions match our SUCCESS_DECISIONS
-            cursor.execute(f"SELECT COUNT(*) FROM decision WHERE decision IN ({','.join(['?' for _ in SUCCESS_DECISIONS])})", SUCCESS_DECISIONS)
-            success_count = cursor.fetchone()[0]
-            print(f"   Decisions with success status: {success_count}")
+            # Check what trackers are actually in client_searchee
+            cursor.execute("""
+                SELECT DISTINCT tracker, COUNT(*) as count 
+                FROM client_searchee 
+                WHERE tracker IS NOT NULL AND tracker != '' 
+                GROUP BY tracker 
+                ORDER BY count DESC 
+                LIMIT 10
+            """)
+            sample_trackers = cursor.fetchall()
+            print("   Sample trackers in client_searchee:")
+            for tracker, count in sample_trackers:
+                print(f"     {tracker}: {count}")
         
         print()  # New line after debug output
         
