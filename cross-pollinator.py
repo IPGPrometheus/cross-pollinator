@@ -186,43 +186,72 @@ def normalize_tracker_name(raw_name):
     name = raw_name.strip()
     original_name = name  # Keep for debugging
     
+    # Handle full URLs first
     if name.startswith('https://'):
-        name = name[8:]
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(name)
+            domain = parsed.netloc.lower()
+            
+            # Direct domain mappings
+            domain_mapping = {
+                'www.torrentleech.org': 'TL',
+                'tleechreload.org': 'TL',
+                'torrentleech.org': 'TL',
+                'blutopia.cc': 'BLU',
+                'beyond-hd.me': 'BHD',
+                'aither.cc': 'AITHER', 
+                'anthelion.me': 'ANT',
+                'hdbits.org': 'HDB',
+                'passthepopcorn.me': 'PTP',
+                'morethantv.me': 'MTV',
+                'hawke.uno': 'HUNO',
+                'lst.gg': 'LST',
+                'onlyencodes.cc': 'OE',
+                'cathode-ray.tube': 'CRT',
+                'signal.cathode-ray.tube': 'CRT',
+                'filelist.io': 'FL',
+                'reactor.filelist.io': 'FL',
+                'reactor.thefl.org': 'FL'
+            }
+            
+            if domain in domain_mapping:
+                return domain_mapping[domain]
+            
+            # Fallback patterns for partial matches
+            if 'torrentleech' in domain:
+                return 'TL'
+            elif 'blutopia' in domain:
+                return 'BLU'
+            elif 'beyond-hd' in domain:
+                return 'BHD'
+            elif 'aither' in domain:
+                return 'AITHER'
+            elif 'anthelion' in domain:
+                return 'ANT'
+            elif 'hawke' in domain:
+                return 'HUNO'
+            elif 'onlyencodes' in domain:
+                return 'OE'
+            elif 'lst.gg' in domain:
+                return 'LST'
+            elif 'filelist' in domain:
+                return 'FL'
+            elif 'cathode-ray' in domain:
+                return 'CRT'
+            
+            # If we can't match the domain, log it and return None
+            print(f"🔍 DEBUG: Could not normalize URL domain '{domain}' from '{original_name}'")
+            return None
+            
+        except Exception as e:
+            print(f"🔍 DEBUG: Error parsing URL '{original_name}': {e}")
+            return None
+    
+    # Handle non-URL cases
     if name.endswith(' (API)'):
         name = name[:-6]
     if name.startswith('FileList-'):
-        return 'FL'
-    
-    # Special handling for tracker URLs and variations (case-insensitive)
-    name_lower = name.lower()
-    
-    if 'tleechreload.org' in name_lower or 'torrentleech.org' in name_lower:
-        return 'TL'
-    if 'blutopia.cc' in name_lower or 'blutopia' in name_lower:
-        return 'BLU'
-    if 'beyond-hd.me' in name_lower or 'beyond-hd' in name_lower:
-        return 'BHD'
-    if 'aither.cc' in name_lower or 'aither' in name_lower:
-        return 'AITHER'
-    if 'anthelion.me' in name_lower or 'anthelion' in name_lower:
-        return 'ANT'
-    if 'hdbits.org' in name_lower or 'hdbits' in name_lower:
-        return 'HDB'
-    if 'passthepopcorn.me' in name_lower:
-        return 'PTP'
-    if 'morethantv.me' in name_lower or 'morethantv' in name_lower:
-        return 'MTV'
-    if 'cathode-ray.tube' in name_lower or 'signal.cathode-ray.tube' in name_lower:
-        return 'CRT'
-    if 'hawke' in name_lower:
-        return 'HUNO'
-    if 'lst' in name_lower and len(name) <= 5:  # Avoid false matches
-        return 'LST'
-    if 'onlyencodes' in name_lower:
-        return 'OE'
-    if 'oldtoons' in name_lower:
-        return 'OTW'
-    if 'filelist' in name_lower or 'reactor.filelist.io' in name_lower or 'reactor.thefl.org' in name_lower:
         return 'FL'
     
     # Check exact matches first, then case-insensitive
@@ -232,7 +261,7 @@ def normalize_tracker_name(raw_name):
         if name.lower() in [v.lower() for v in variants]:
             return abbrev
     
-    # Debug: Log unrecognized tracker names
+    # Debug: Log unrecognized tracker names (but only for non-URLs)
     print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{name}'")
     return None
 
