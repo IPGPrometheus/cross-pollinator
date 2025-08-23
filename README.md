@@ -1,83 +1,127 @@
-# Cross-Pollinator
+# Cross-Pollinator: Maximize Your Seed
 
-Cross-seed Missing Tracker Analyzer - Identifies torrents missing from specific trackers by analyzing cross-seed database records.
+Cross-Pollinator is a Python script/Docker container that analyzes your [cross-seed](https://github.com/cross-seed/cross-seed) database to find torrents you are seeding that are **missing** from trackers you are on. It tells you what trackers your files are found or not found on and can output a nice, simple list of pre-written commands for [Audionut's Upload Assistant](https://github.com/Audionut/Upload-Assistant).
 
-## What It Does
 
-Cross-Pollinator analyzes your cross-seed database to find torrents that are **missing** from specific trackers.
-This creates a nice, simple list with the CLI for UploadAssistant.
-
-It does not validate your uploads, it does not validate your files. 
-
-YOU, AND ONLY YOU, ARE RESPONSIBLE FOR FOLLOWING THE RULES OF THE TRACKERS YOU ARE ON. 
-THIS MEANS FOLLOWING ALL THE RULES PRESENT ON THE SITES YOU UPLOAD TO. 
-
-### Key Features
-
-- **🎯 Missing Focus**: Only shows torrents missing from trackers (not ones already found.
-- **🔍 Database Analysis**: Direct SQLite database analysis for accurate results
-- **🐳 Docker Ready**: Full Docker setup for easy deployment
-- **📊 Statistics**: Detailed upload statistics per tracker
+> [!WARNING]
+> It does not validate your uploads, it does not validate your files.
+> 
+> **YOU, AND ONLY YOU, ARE RESPONSIBLE FOR FOLLOWING THE RULES OF THE TRACKERS YOU ARE ON. THIS MEANS FOLLOWING ALL THE RULES PRESENT ON THE SITES YOU UPLOAD TO.**
 
 ## Sample Output
+```bash
+🎬 Missing Video Files by Tracker:
+================================================================================
 
+🎬️  12.Angry.Men.1997.1080p.BluRay.FLAC2.0.x264-NTb.mkv
+   📁 Path: /data/torrents/movies
+   ❌ Missing from: HUNO, OE, OTW, SP
+   ✅ Found on: AITHER, ANT, BLU, LST, ULCX
+
+🎬️  12.Years.a.Slave.2013.1080p.BluRay.DTS.x264-SbR.mkv
+   📁 Path: /data/torrents/movies
+   ❌ Missing from: HUNO, LST, OE, OTW, SP
+   ✅ Found on: AITHER, ANT, BLU, LST, ULCX
+
+🎬️  2001.A.Space.Odyssey.1968.1080p.MAX.WEB-DL.DDP5.1.DV.HDR.H.265-Kitsune.mkv
+   📁 Path: /data/torrents/movies
+   ❌ Missing from: LST, OE, OTW, SP, ULCX
+   ✅ Found on: AITHER, ANT, BLU, HUNO
 ```
-# Cross-Pollinator: Generated date time
-# Total files needing upload: 617
- Note this is a build line for existing torrents on trackers. 
- If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number 
-# 10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv
-# Missing from: FL
-# Found on: TL
-python3 upload.py "/data/onions/radarr/10 Cloverfield Lane (2016) (1080p BluRay x265 Silence).mkv" --trackers FL,TL
+
+### Output File:
+
+```bash
+# Cross-Pollinator: Generated <datetime>
+# Total files needing upload: 552
+# Note this is a build line for existing torrents on trackers.
+# If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number
+
+# 12.Angry.Men.1997.1080p.BluRay.FLAC2.0.x264-NTb.mkv
+# Missing from: HUNO, OE, OTW, SP
+# Found on: AITHER, ANT, BLU, LST, ULCX
+python3 upload.py "/data/torrents/movies/12.Angry.Men.1997.1080p.BluRay.FLAC2.0.x264-NTb.mkv" --trackers AITHER,ANT,BLU,LST,ULCX
+
+# 12.Years.a.Slave.2013.1080p.BluRay.DTS.x264-SbR.mkv
+# Missing from: HUNO, LST, OE, OTW, SP
+# Found on: AITHER, ANT, BLU, LST, ULCX
+python3 upload.py "/data/torrents/movies/12.Years.a.Slave.2013.1080p.BluRay.DTS.x264-SbR.mkv" --trackers HUNO,LST,OE,OTW,SP
+
+# 2001.A.Space.Odyssey.1968.1080p.MAX.WEB-DL.DDP5.1.DV.HDR.H.265-Kitsune.mkv
+# Missing from: LST, OE, OTW, SP, ULCX
+# Found on: AITHER, ANT, BLU, HUNO
+python3 upload.py "/data/torrents/movies/2001.A.Space.Odyssey.1968.1080p.MAX.WEB-DL.DDP5.1.DV.HDR.H.265-Kitsune.mkv" --trackers LST,OE,OTW,SP,ULCX
 ```
 
 ## Installation
-1. **install with Docker Compose**
+
+### Docker
+
+**Install with Docker Compose**
+
+```bash
+cd /path/to/docker/appdata
+
+git clone https://github.com/IPGPrometheus/cross-pollinator.git
+
+cd cross-pollinator
+
+docker compose up -d
+```
+
+### Unraid
+
+1. Download the [Docker Compose Manager](https://forums.unraid.net/topic/114415-plugin-docker-compose-manager/) from the app store.
+2. Open the terminal and type the following:
+
+   ```bash
+   cd /mnt/user/appdata
    ```
-   cd /mnt/user/appdata or to the desired installation location. 
+
+   ```bash
    git clone https://github.com/IPGPrometheus/cross-pollinator.git
-   cd cross-pollinator
-
-   docker-compose build cross-pollinator
-   docker-compose up -d cross-pollinator 
-    OR 
-   using https://forums.unraid.net/topic/114415-plugin-docker-compose-manager/ 
-     available on the App Store. 
-
-   cd /mnt/user/appdata or to the desired installation location.  
-   git clone https://github.com/IPGPrometheus/cross-pollinator.git
-
-   Head over to the Docker tab - go to Compose at the bottom. Add New Stack
-   Click Advanced, then set the stack directory as the installation location. 
-   Name the stack. Click okay.
-   Click the gear icon next to the name, then edit stack - edit compose file. Make sure that the docker compose shows up. 
-   Close / Click Cancel. 
-
-   Compose up 
    ```
+3. Head over to the Docker tab and go to Compose at the bottom. Click on **Add New Stack.**
+4. Give it a name, click on **Advanced**, then set the stack directory `/mnt/user/appdata/cross-pollinator` as the installation location. Click **OK**.
+5. Click the gear icon next to the name, then **Edit Stack** - **Compose File**. Make sure that the text editor is not empty and the stack shows up. 
+6. Click **Save Changes**. 
+7. Click **Compose Up**.
+
+### Python
+
+TBA
 
 ## Usage
-1. **Run Analysis**
-   ```
-   Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number     or -tmdb movie/number or -tvdb number
 
-   options:
-     -h, --help         show this help message and exit
-     --run              Run analysis and show missing torrents
-     --output [OUTPUT]  Generate upload commands file (optional filename)
-     --no-emoji         Remove all emojis from output
-     --output-clean     Generate clean output with only upload commands. Add after --output
-   ```
+Open the conatainer's console (Unraid) or type into the terminal
 
+```bash
+docker exec -it cross-pollinator bash
+```
 
-### Console run
+To run the program, type:
+
+```bash
+cross-pollinator --run [options]
 ```
-cross-pollinator.py --run [options]
+
+Or, run directly from terminal:
+
+```bash
+docker exec -it cross-pollinator cross-pollinator --run [options]
 ```
-### Command Line run
+
+### Options
+
 ```
-docker exec -it cross-pollinator cross-pollinator.py --run [options]
+Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change anything, please add -tmdb TV/number or -tmdb movie/number or -tvdb number
+
+options:
+  -h, --help         show this help message and exit
+  --run              Run analysis and show missing torrents
+  --output [OUTPUT]  Generate upload commands file [optional filename]
+  --no-emoji         Remove all emojis from output (thanks Claude)
+  --output-clean     Generate clean output with only upload commands. Add after --output
 ```
 
 ## Configuration
@@ -86,14 +130,13 @@ docker exec -it cross-pollinator cross-pollinator.py --run [options]
 
 Copy `.env.example` to `.env` and adjust:
 
-```bash
-CROSS_SEED_DIR=/path/to/your/cross-seed
-TZ=America/New_York
-```
+`CROSS_SEED_DIR`: path to folder containing your `cross-seed.db`
+
+`TZ`: [TZ Identifier](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
 
 ### Tracker Mapping
 
-The script includes comprehensive tracker mapping in `TRACKER_MAPPING`. Add new trackers as needed:
+The script includes comprehensive tracker mapping in `TRACKER_MAPPING`. Add new trackers as needed in `cross-pollinator.py`:
 
 ```python
 TRACKER_MAPPING = {
@@ -102,7 +145,7 @@ TRACKER_MAPPING = {
 }
 ```
 
-### Config File 
+### Config File
 
 Create config/config.json in the container dir for tracker-specific validation rules.
 
@@ -125,7 +168,6 @@ Create config/config.json in the container dir for tracker-specific validation r
     }
   }
 }
-
 ```
 
 ## How It Works
@@ -139,25 +181,31 @@ Create config/config.json in the container dir for tracker-specific validation r
 ## Troubleshooting
 
 ### Database Not Found
+
 ```
 ❌ Database not found: /cross-seed/cross-seed.db
 ```
+
 - Check your `CROSS_SEED_DIR` path in `.env`
 - Ensure cross-seed container is running and has created database
 
 ### No Configured Trackers
+
 ```
 ❌ No configured trackers found
 ```
+
 - Run cross-seed searches first to populate database
 - Check if your tracker names match the `TRACKER_MAPPING`
 
 ### Unknown Trackers
+
 The script filters out unmapped trackers like `concertos`, `www` to avoid noise. Add them to `TRACKER_MAPPING` if needed.
 
 ## Development
 
 ### Project Structure
+
 ```
 cross-pollinator/
 ├── cross-pollinator.py    # Main application
