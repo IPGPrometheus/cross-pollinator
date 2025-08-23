@@ -179,103 +179,84 @@ def is_anime_content(filename):
     
     return False
 
-def normalize_tracker_url(tracker_url):
-    """Normalize tracker URL to standard abbreviation."""
-    if not tracker_url:
-        return None
-        
-    url_lower = tracker_url.lower().strip()
+def get_available_trackers_from_mapping():
+    """Get list of trackers that are available based on TRACKER_MAPPING keys."""
+    # These are the trackers we want to consider for cross-seeding
+    # Based on the TRACKER_MAPPING, these are the ones the user likely has access to
+    available_trackers = {
+        'AITHER', 'ANT', 'BLU', 'HUNO', 'LST', 'MAM', 'OE', 'ULCX', 
+        'JPopsuki', 'TL', 'CinemaZ', 'OTW', 'RF', 'FL'
+    }
     
-    # Handle special cases first
-    if 'filelist' in url_lower:
-        return 'FL'
-    
-    # Extract domain from URL
-    domain = url_lower
-    if url_lower.startswith('http'):
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url_lower)
-            domain = parsed.netloc.lower()
-            # Remove www. prefix
-            if domain.startswith('www.'):
-                domain = domain[4:]
-        except Exception:
-            pass
-    
-    # Match against TRACKER_MAPPING
-    for abbrev, variants in TRACKER_MAPPING.items():
-        for variant in variants:
-            variant_lower = variant.lower()
-            if variant_lower in domain or domain in variant_lower:
-                return abbrev
-    
-    return None
+    return sorted(available_trackers)
 
 def build_tracker_mapping():
-    """Build a mapping of raw tracker URLs to normalized abbreviations."""
+    """Get unique trackers directly from the database since they're already abbreviated."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print("Step 1: Building tracker mapping from database...")
+        print("Step 1: Getting unique trackers from database...")
         
-        # Get all unique tracker URLs from the database
+        # Get all unique tracker abbreviations from the database
         cursor.execute("""
             SELECT DISTINCT value
             FROM client_searchee, json_each(client_searchee.trackers)
             WHERE value IS NOT NULL AND value != ''
         """)
         
-        raw_trackers = [row[0] for row in cursor.fetchall()]
+        db_trackers = [row[0] for row in cursor.fetchall()]
         conn.close()
         
-        # Build mapping of raw tracker -> normalized abbreviation
-        tracker_map = {}
-        unmatched_trackers = []
+        # Filter to only include trackers that exist in our TRACKER_MAPPING
+        valid_trackers = []
+        unknown_trackers = []
         
-        print(f"Found {len(raw_trackers)} unique tracker URLs to map")
-        
-        for raw_tracker in raw_trackers:
-            normalized = normalize_tracker_url(raw_tracker)
-            if normalized:
-                tracker_map[raw_tracker] = normalized
+        for tracker in db_trackers:
+            if tracker in TRACKER_MAPPING:
+                valid_trackers.append(tracker)
             else:
-                unmatched_trackers.append(raw_tracker)
+                unknown_trackers.append(tracker)
         
-        print(f"Successfully mapped {len(tracker_map)} trackers")
-        if unmatched_trackers:
-            print(f"Warning: {len(unmatched_trackers)} trackers could not be mapped:")
-            for tracker in sorted(unmatched_trackers)[:10]:  # Show first 10
+        valid_trackers = sorted(set(valid_trackers))
+        
+        print(f"Found {len(db_trackers)} total tracker entries")
+        print(f"Mapped {len(valid_trackers)} valid trackers: {', '.join(valid_trackers)}")
+        
+        if unknown_trackers:
+            unknown_trackers = sorted(set(unknown_trackers))
+            print(f"Warning: {len(unknown_trackers)} unknown trackers not in mapping:")
+            for tracker in unknown_trackers[:10]:  # Show first 10
                 print(f"  - {tracker}")
-            if len(unmatched_trackers) > 10:
-                print(f"  ... and {len(unmatched_trackers) - 10} more")
+            if len(unknown_trackers) > 10:
+                print(f"  ... and {len(unknown_trackers) - 10} more")
         
-        # Get unique normalized tracker abbreviations
-        unique_trackers = sorted(set(tracker_map.values()))
-        print(f"Available tracker abbreviations: {', '.join(unique_trackers)}")
-        
-        return tracker_map, unique_trackers
+        return valid_trackers
         
     except Exception as e:
         print(f"Error building tracker mapping: {e}")
-        return {}, []
+        return []
 
 def get_all_unique_trackers():
     """Get all unique trackers from client_searchee.trackers column."""
-    tracker_map, unique_trackers = build_tracker_mapping()
-    return unique_trackers
+    return build_tracker_mapping()
 
-def filter_relevant_trackers(all_trackers, filename):
-    """Filter trackers based on content type."""
+def filter_relevant_trackers(all_trackers, filename, available_trackers=None):
+    """Filter trackers based on content type and available trackers."""
     is_anime = is_anime_content(filename)
+    
+    # If available_trackers is provided, only consider those trackers
+    if available_trackers:
+        candidate_trackers = set(all_trackers) & set(available_trackers)
+    else:
+        candidate_trackers = set(all_trackers)
     
     if is_anime:
         # For anime, include anime trackers and exclude general movie/TV trackers
-        return sorted(set(all_trackers) & (ANIME_TRACKERS | (set(all_trackers) - GENERAL_TRACKERS)))
+        return sorted(candidate_trackers & (ANIME_TRACKERS | (candidate_trackers - GENERAL_TRACKERS)))
     else:
         # For non-anime, exclude anime-specific trackers
-        return sorted(set(all_trackers) - ANIME_TRACKERS)
+        return sorted(candidate_trackers - ANIME_TRACKERS)
 
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
@@ -311,14 +292,17 @@ def analyze_missing_trackers():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Build tracker mapping and get all unique trackers
-        tracker_map, all_trackers = build_tracker_mapping()
+        # Get all unique trackers from database (already abbreviated)
+        all_db_trackers = build_tracker_mapping()
         
-        if not all_trackers:
+        if not all_db_trackers:
             print("No trackers found in database")
             return []
         
-        print(f"Found {len(all_trackers)} unique trackers: {', '.join(all_trackers)}")
+        # Get available trackers that we want to consider for cross-seeding
+        available_trackers = get_available_trackers_from_mapping()
+        print(f"Available trackers for cross-seeding: {', '.join(available_trackers)}")
+        print(f"Total trackers found in database: {', '.join(all_db_trackers)}")
         
         # Get all torrents with their tracker lists and paths
         print("\nStep 2: Analyzing torrents and their tracker coverage...")
@@ -357,17 +341,15 @@ def analyze_missing_trackers():
                 continue
             
             try:
-                # Parse the trackers JSON
-                current_trackers = json.loads(trackers_json)
+                # Parse the trackers JSON - these should already be abbreviated
+                current_tracker_list = json.loads(trackers_json)
                 
-                # Use pre-built mapping to normalize tracker URLs
-                found_trackers = set()
-                for tracker_url in current_trackers:
-                    if tracker_url in tracker_map:
-                        found_trackers.add(tracker_map[tracker_url])
+                # Convert to set and filter only valid trackers from our mapping
+                found_trackers = set(tracker for tracker in current_tracker_list 
+                                   if tracker in TRACKER_MAPPING)
                 
-                # Filter relevant trackers for this content
-                relevant_trackers = filter_relevant_trackers(all_trackers, name)
+                # Filter relevant trackers for this content - only consider available trackers
+                relevant_trackers = filter_relevant_trackers(available_trackers, name, available_trackers)
                 
                 # Find missing trackers
                 missing_trackers = sorted(set(relevant_trackers) - found_trackers)
@@ -406,7 +388,7 @@ def analyze_missing_trackers():
                 
                 # Use first item as primary and update its found trackers
                 primary_item = items[0]
-                relevant_trackers = filter_relevant_trackers(all_trackers, primary_item['name'])
+                relevant_trackers = filter_relevant_trackers(available_trackers, primary_item['name'], available_trackers)
                 missing_trackers = sorted(set(relevant_trackers) - merged_found_trackers)
                 
                 if missing_trackers:
@@ -510,16 +492,16 @@ def debug_database_content(limit=10):
             with_trackers = cursor.fetchone()[0]
             f.write(f"Records with trackers: {with_trackers}\n")
             
-            # Show tracker mapping
-            f.write(f"\nTracker Mapping Analysis:\n")
-            tracker_map, unique_trackers = build_tracker_mapping()
+            # Show tracker analysis
+            f.write(f"\nTracker Analysis:\n")
+            all_db_trackers = build_tracker_mapping()
+            available_trackers = get_available_trackers_from_mapping()
             
-            f.write(f"\nRaw tracker URL to normalized mapping:\n")
-            for raw, normalized in sorted(tracker_map.items()):
-                f.write(f"  {raw} -> {normalized}\n")
+            f.write(f"\nTrackers found in database ({len(all_db_trackers)}):\n")
+            f.write(f"  {', '.join(all_db_trackers)}\n")
             
-            f.write(f"\nUnique normalized trackers ({len(unique_trackers)}):\n")
-            f.write(f"  {', '.join(unique_trackers)}\n")
+            f.write(f"\nAvailable trackers for cross-seeding ({len(available_trackers)}):\n")
+            f.write(f"  {', '.join(available_trackers)}\n")
             
             # Sample tracker data
             f.write(f"\nSample torrent tracker data (first {limit}):\n")
@@ -537,8 +519,8 @@ def debug_database_content(limit=10):
                     trackers = json.loads(trackers_json)
                     f.write(f"  {name}:\n")
                     for tracker in trackers:
-                        normalized = tracker_map.get(tracker, "UNMAPPED")
-                        f.write(f"    {tracker} -> {normalized}\n")
+                        status = "VALID" if tracker in TRACKER_MAPPING else "UNKNOWN"
+                        f.write(f"    {tracker} -> {status}\n")
                 except json.JSONDecodeError:
                     f.write(f"  {name}: Invalid JSON\n")
             
