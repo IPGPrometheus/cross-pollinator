@@ -714,7 +714,13 @@ def debug_database_content(limit=10):
             cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL LIMIT ?", (limit,))
             for row in cursor.fetchall():
                 guid = row[0]
-                tracker_name = guid.split('.')[0] if '.' in guid else guid
+                tracker_name = guid
+                if guid.startswith("http"):
+                    try:
+                        parsed = urlparse(guid)
+                        tracker_name = parsed.netloc  # e.g. www.torrentleech.org
+                    except Exception:
+                        pass
                 normalized = normalize_tracker_name(tracker_name)
                 f.write(f"  {guid} -> {tracker_name} -> {normalized}\n")
             
