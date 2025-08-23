@@ -188,6 +188,10 @@ def normalize_tracker_name(raw_name):
     
     if name.startswith('https://'):
         name = name[8:]
+    if name.startswith('https://www.torrentleech'):
+        return 'TL'
+    if name.startswith('https://www.cathode'):
+        return 'CRT'
     if name.endswith(' (API)'):
         name = name[:-6]
     if name.startswith('FileList-'):
