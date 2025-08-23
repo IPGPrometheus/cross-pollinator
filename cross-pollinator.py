@@ -190,38 +190,67 @@ def get_available_trackers_from_mapping():
     
     return sorted(available_trackers)
 
+def map_domain_to_abbreviation(domain):
+    """Map a tracker domain to its abbreviation using TRACKER_MAPPING."""
+    if not domain:
+        return None
+    
+    domain_lower = domain.lower().strip()
+    
+    # Search through TRACKER_MAPPING to find which abbreviation this domain belongs to
+    for abbrev, variants in TRACKER_MAPPING.items():
+        for variant in variants:
+            variant_lower = variant.lower()
+            
+            # Exact match
+            if domain_lower == variant_lower:
+                return abbrev
+            
+            # Partial match - check if variant is contained in the domain
+            if variant_lower in domain_lower:
+                return abbrev
+            
+            # Reverse partial match - check if domain is contained in variant
+            if domain_lower in variant_lower:
+                return abbrev
+    
+    return None
+
 def build_tracker_mapping():
-    """Get unique trackers directly from the database since they're already abbreviated."""
+    """Get unique trackers from database and map them to abbreviations."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         print("Step 1: Getting unique trackers from database...")
         
-        # Get all unique tracker abbreviations from the database
+        # Get all unique tracker domains from the database
         cursor.execute("""
             SELECT DISTINCT value
             FROM client_searchee, json_each(client_searchee.trackers)
             WHERE value IS NOT NULL AND value != ''
         """)
         
-        db_trackers = [row[0] for row in cursor.fetchall()]
+        db_domains = [row[0] for row in cursor.fetchall()]
         conn.close()
         
-        # Filter to only include trackers that exist in our TRACKER_MAPPING
-        valid_trackers = []
+        # Map domains to abbreviations
+        domain_to_abbrev = {}
+        valid_trackers = set()
         unknown_trackers = []
         
-        for tracker in db_trackers:
-            if tracker in TRACKER_MAPPING:
-                valid_trackers.append(tracker)
+        for domain in db_domains:
+            abbrev = map_domain_to_abbreviation(domain)
+            if abbrev:
+                domain_to_abbrev[domain] = abbrev
+                valid_trackers.add(abbrev)
             else:
-                unknown_trackers.append(tracker)
+                unknown_trackers.append(domain)
         
-        valid_trackers = sorted(set(valid_trackers))
+        valid_trackers = sorted(valid_trackers)
         
-        print(f"Found {len(db_trackers)} total tracker entries")
-        print(f"Mapped {len(valid_trackers)} valid trackers: {', '.join(valid_trackers)}")
+        print(f"Found {len(db_domains)} total tracker entries")
+        print(f"Mapped {len(domain_to_abbrev)} domains to {len(valid_trackers)} valid trackers: {', '.join(valid_trackers)}")
         
         if unknown_trackers:
             unknown_trackers = sorted(set(unknown_trackers))
@@ -231,15 +260,16 @@ def build_tracker_mapping():
             if len(unknown_trackers) > 10:
                 print(f"  ... and {len(unknown_trackers) - 10} more")
         
-        return valid_trackers
+        return domain_to_abbrev, valid_trackers
         
     except Exception as e:
         print(f"Error building tracker mapping: {e}")
-        return []
+        return {}, []
 
 def get_all_unique_trackers():
     """Get all unique trackers from client_searchee.trackers column."""
-    return build_tracker_mapping()
+    domain_to_abbrev, valid_trackers = build_tracker_mapping()
+    return valid_trackers
 
 def filter_relevant_trackers(all_trackers, filename, available_trackers=None):
     """Filter trackers based on content type and available trackers."""
@@ -292,8 +322,8 @@ def analyze_missing_trackers():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Get all unique trackers from database (already abbreviated)
-        all_db_trackers = build_tracker_mapping()
+        # Get domain to abbreviation mapping and valid trackers
+        domain_to_abbrev, all_db_trackers = build_tracker_mapping()
         
         if not all_db_trackers:
             print("No trackers found in database")
@@ -341,12 +371,14 @@ def analyze_missing_trackers():
                 continue
             
             try:
-                # Parse the trackers JSON - these should already be abbreviated
-                current_tracker_list = json.loads(trackers_json)
+                # Parse the trackers JSON - these are domain names that need mapping
+                current_domains = json.loads(trackers_json)
                 
-                # Convert to set and filter only valid trackers from our mapping
-                found_trackers = set(tracker for tracker in current_tracker_list 
-                                   if tracker in TRACKER_MAPPING)
+                # Map domains to abbreviations
+                found_trackers = set()
+                for domain in current_domains:
+                    if domain in domain_to_abbrev:
+                        found_trackers.add(domain_to_abbrev[domain])
                 
                 # Filter relevant trackers for this content - only consider available trackers
                 relevant_trackers = filter_relevant_trackers(available_trackers, name, available_trackers)
@@ -494,8 +526,12 @@ def debug_database_content(limit=10):
             
             # Show tracker analysis
             f.write(f"\nTracker Analysis:\n")
-            all_db_trackers = build_tracker_mapping()
+            domain_to_abbrev, all_db_trackers = build_tracker_mapping()
             available_trackers = get_available_trackers_from_mapping()
+            
+            f.write(f"\nDomain to abbreviation mapping:\n")
+            for domain, abbrev in sorted(domain_to_abbrev.items()):
+                f.write(f"  {domain} -> {abbrev}\n")
             
             f.write(f"\nTrackers found in database ({len(all_db_trackers)}):\n")
             f.write(f"  {', '.join(all_db_trackers)}\n")
@@ -519,8 +555,8 @@ def debug_database_content(limit=10):
                     trackers = json.loads(trackers_json)
                     f.write(f"  {name}:\n")
                     for tracker in trackers:
-                        status = "VALID" if tracker in TRACKER_MAPPING else "UNKNOWN"
-                        f.write(f"    {tracker} -> {status}\n")
+                        abbrev = domain_to_abbrev.get(tracker, "UNMAPPED")
+                        f.write(f"    {tracker} -> {abbrev}\n")
                 except json.JSONDecodeError:
                     f.write(f"  {name}: Invalid JSON\n")
             
