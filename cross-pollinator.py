@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 import re
+import time
 
 # Configuration
 CROSS_SEED_DIR = "/cross-seed"
@@ -121,6 +122,27 @@ GENERAL_TRACKERS = {'PTP', 'HDB', 'BLU', 'BHD', 'AITHER', 'ANT', 'MTV', 'FL', 'T
 
 SUCCESS_DECISIONS = ['MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS']
 
+def print_progress_bar(current, total, start_time, prefix="Progress", length=50):
+    """Print a progress bar with estimated time remaining."""
+    if total == 0:
+        return
+    
+    percent = current / total
+    filled_length = int(length * percent)
+    bar = '█' * filled_length + '-' * (length - filled_length)
+    
+    # Calculate time estimates
+    elapsed_time = time.time() - start_time
+    if current > 0:
+        avg_time_per_item = elapsed_time / current
+        remaining_items = total - current
+        eta_seconds = avg_time_per_item * remaining_items
+        eta_str = f"ETA: {int(eta_seconds//60):02d}:{int(eta_seconds%60):02d}"
+    else:
+        eta_str = "ETA: --:--"
+    
+    print(f'\r{prefix}: |{bar}| {current}/{total} ({percent:.1%}) {eta_str}', end='', flush=True)
+
 def is_video_file(filename):
     """Check if filename has a video file extension."""
     video_extensions = {
@@ -187,6 +209,8 @@ def normalize_tracker_name(raw_name):
         return 'PTP'
     if 'morethantv.me' in name:
         return 'MTV'
+    if 'cathode-ray.tube' in name:
+        return 'CRT'
     
     for abbrev, variants in TRACKER_MAPPING.items():
         if name in variants or name.lower() in [v.lower() for v in variants]:
@@ -299,11 +323,15 @@ def get_torrents_with_paths():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        print("🔍 Getting configured trackers...")
         all_trackers = get_all_configured_trackers()
         active_trackers = get_active_trackers()
         
         if not all_trackers:
             return []
+        
+        print("📊 Analyzing torrents and their tracker status...")
+        start_time = time.time()
         
         # Get torrents with paths
         cursor.execute("""
@@ -313,51 +341,87 @@ def get_torrents_with_paths():
             ORDER BY name
         """)
         
+        torrent_rows = cursor.fetchall()
+        total_torrents = len(torrent_rows)
+        
+        if total_torrents == 0:
+            print("No torrents with paths found in database")
+            return []
+        
         name_to_info = defaultdict(lambda: {'info_hashes': set(), 'paths': set(), 'found_trackers': set()})
-        for row in cursor.fetchall():
+        
+        # Process torrents with progress bar
+        for i, row in enumerate(torrent_rows):
+            print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
             name, info_hash, save_path = row
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
         
-        # Get latest decisions for each tracker/info_hash
+        print()  # New line after progress bar
+        
+        # Get all decisions for better tracker matching
+        print("🔄 Analyzing tracker decisions...")
         cursor.execute("""
-            SELECT cs.info_hash, d.guid, d.decision, cs.name
-            FROM client_searchee cs
-            JOIN decision d ON cs.info_hash = d.info_hash
-            WHERE d.last_seen = (
-                SELECT MAX(d2.last_seen)
-                FROM decision d2
-                WHERE d2.info_hash = d.info_hash 
-                AND d2.guid = d.guid
-            )
+            SELECT d.info_hash, d.guid, d.decision, cs.name
+            FROM decision d
+            JOIN client_searchee cs ON d.info_hash = cs.info_hash
+            WHERE d.guid IS NOT NULL
+            ORDER BY d.last_seen DESC
         """)
         
-        # Map decisions to torrents
-        for row in cursor.fetchall():
+        decision_rows = cursor.fetchall()
+        total_decisions = len(decision_rows)
+        
+        # Process decisions with progress bar
+        decision_start = time.time()
+        processed_pairs = set()  # Track processed (info_hash, guid) pairs
+        
+        for i, row in enumerate(decision_rows):
+            if i % 100 == 0 or i == total_decisions - 1:  # Update every 100 decisions or at the end
+                print_progress_bar(i + 1, total_decisions, decision_start, "Processing decisions")
+            
             info_hash, guid, decision, torrent_name = row
+            pair_key = (info_hash, guid)
+            
+            # Skip if we've already processed this info_hash/tracker combination (keeps latest)
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+            
             tracker_name = guid.split('.')[0] if '.' in guid else guid
             normalized = normalize_tracker_name(tracker_name)
+            
             if not normalized:
                 continue
-                
-            for name, info in name_to_info.items():
-                if info_hash in info['info_hashes']:
-                    if decision in SUCCESS_DECISIONS:
-                        info['found_trackers'].add(normalized)
-                    break
+            
+            # Find the matching torrent name and update its found_trackers
+            if torrent_name in name_to_info and decision in SUCCESS_DECISIONS:
+                name_to_info[torrent_name]['found_trackers'].add(normalized)
         
+        print()  # New line after progress bar
+        
+        print("🔄 Grouping content and detecting duplicates...")
         # Group by normalized content name to detect duplicates
         content_groups = defaultdict(list)
+        video_files = 0
+        
         for name, info in name_to_info.items():
             if is_video_file(name):
+                video_files += 1
                 normalized_name = normalize_content_name(name)
                 content_groups[normalized_name].append((name, info))
+        
+        print(f"📹 Found {video_files} video files to analyze")
         
         # Build results with missing trackers
         results = []
         processed_content = set()
+        analysis_start = time.time()
+        total_content_groups = len(content_groups)
         
-        for normalized_name, items in content_groups.items():
+        for i, (normalized_name, items) in enumerate(content_groups.items()):
+            print_progress_bar(i + 1, total_content_groups, analysis_start, "Analyzing content")
+            
             if normalized_name in processed_content:
                 continue
             
@@ -394,6 +458,7 @@ def get_torrents_with_paths():
             
             processed_content.add(normalized_name)
         
+        print()  # New line after progress bar
         conn.close()
         return results
         
@@ -415,12 +480,17 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     else:
         filename = appdata_dir / f"upload_commands_{timestamp}.txt"
     
+    print("📝 Generating upload commands...")
+    start_time = time.time()
+    
     with open(filename, 'w') as f:
         if not clean_output:
             f.write(f"# UAhelper: Generated {datetime.now()}\n")
             f.write(f"# Total files needing upload: {len(results)}\n\n")
         
-        for item in sorted(results, key=lambda x: x['name'].lower()):
+        for i, item in enumerate(sorted(results, key=lambda x: x['name'].lower())):
+            print_progress_bar(i + 1, len(results), start_time, "Writing commands")
+            
             if not clean_output:
                 f.write(f"# {item['name']}\n")
                 if item.get('duplicates'):
@@ -441,7 +511,8 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
             f.write(f'python3 upload.py "{full_file_path}" --trackers {tracker_list}\n')
             if not clean_output:
                 f.write('\n')
-
+    
+    print()  # New line after progress bar
     print(f"✅ Upload commands written to: {filename}")
     return filename
 
