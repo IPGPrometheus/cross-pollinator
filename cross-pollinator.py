@@ -23,7 +23,7 @@ DB_PATH = "/cross-seed/cross-seed.db"
 # Use environment variable or default to /logs (writable volume)
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
 
-# Comprehensive tracker mapping - Updated with more trackers and variants
+# Comprehensive tracker mapping - Updated with exact domain matches first
 TRACKER_MAPPING = {
     'ACM': ['ACM', 'eiga'],
     'AITHER': ['AITHER', 'aither', 'aither.cc'], 
@@ -216,28 +216,36 @@ def extract_unique_trackers_from_db():
         return []
 
 def map_domain_to_abbreviation(domain):
-    """Map a tracker domain to its abbreviation using TRACKER_MAPPING."""
+    """Map a tracker domain to its abbreviation using TRACKER_MAPPING with improved matching."""
     if not domain:
         return None
     
     domain_lower = domain.lower().strip()
     
-    # Search through TRACKER_MAPPING to find which abbreviation this domain belongs to
+    # Create a list of (abbrev, variant) tuples sorted by variant length (longest first)
+    # This ensures exact matches are tried before partial matches
+    matches = []
     for abbrev, variants in TRACKER_MAPPING.items():
         for variant in variants:
-            variant_lower = variant.lower()
-            
-            # Exact match
-            if domain_lower == variant_lower:
-                return abbrev
-            
-            # Check if variant is contained in the domain (handles tracker.domain.org cases)
-            if variant_lower in domain_lower:
-                return abbrev
-            
-            # Check if domain is contained in variant  
-            if domain_lower in variant_lower:
-                return abbrev
+            matches.append((abbrev, variant.lower()))
+    
+    # Sort by variant length (descending) to prioritize exact/longer matches
+    matches.sort(key=lambda x: len(x[1]), reverse=True)
+    
+    # Try exact matches first
+    for abbrev, variant in matches:
+        if domain_lower == variant:
+            return abbrev
+    
+    # Try partial matches (variant contained in domain) - for tracker.domain.org cases
+    for abbrev, variant in matches:
+        if variant in domain_lower and len(variant) > 3:  # Avoid very short partial matches
+            return abbrev
+    
+    # Try reverse partial matches (domain contained in variant) - be very conservative
+    for abbrev, variant in matches:
+        if domain_lower in variant and len(domain_lower) > 5:  # Only for longer domains
+            return abbrev
     
     return None
 
