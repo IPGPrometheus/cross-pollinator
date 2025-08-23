@@ -185,39 +185,6 @@ def is_anime_content(filename):
 def normalize_tracker_name(raw_name):
     """Normalize tracker names to standard abbreviations using TRACKER_MAPPING."""
     name = raw_name.strip()
-    original_name = name  # For debugging
-
-    # Special case: FileList shorthand
-    if name.startswith('Filelist-'):
-        return 'FL'
-    
-    if host.startswith("https://www."):
-        host = host[4:]
-    
-    # If it's a URL, extract hostname
-    if name.startswith('https://'):
-        try:
-            parsed = urlparse(name)
-            host = parsed.netloc.lower()
-        except Exception:
-            host = name.lower()
-    else:
-        host = name.lower()
-
-    # Match against TRACKER_MAPPING
-    for abbrev, variants in TRACKER_MAPPING.items():
-        for variant in variants:
-            v = variant.lower()
-            if v in host or host in v:
-                return abbrev
-
-    # Debug logging if no match
-    print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{host}'")
-    return None
-
-def normalize_tracker_name(raw_name):
-    """Normalize tracker names to standard abbreviations using TRACKER_MAPPING."""
-    name = raw_name.strip()
     original_name = name
 
     if name.startswith('Filelist-'):
