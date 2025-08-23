@@ -351,9 +351,9 @@ def get_torrents_with_paths():
         print("📊 Analyzing torrents and their tracker status...")
         start_time = time.time()
         
-        # Get torrents with paths
+        # Get torrents with paths - also get tracker info from client_searchee
         cursor.execute("""
-            SELECT name, info_hash, save_path
+            SELECT name, info_hash, save_path, tracker
             FROM client_searchee
             WHERE save_path IS NOT NULL AND save_path != ''
             ORDER BY name
@@ -372,10 +372,56 @@ def get_torrents_with_paths():
         # Process torrents with progress bar
         for i, row in enumerate(torrent_rows):
             print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
-            name, info_hash, save_path = row
+            name, info_hash, save_path, tracker = row
             name_to_info[name]['info_hashes'].add(info_hash)
             name_to_info[name]['paths'].add(save_path)
             info_hash_to_name[info_hash] = name
+            
+            # Add tracker from client_searchee if available
+            if tracker:
+                # Extract tracker name from URL or use as-is
+                if tracker.startswith('http'):
+                    # Extract domain from URL
+                    from urllib.parse import urlparse
+                    parsed = urlparse(tracker)
+                    tracker_domain = parsed.netloc.lower()
+                    
+                    # Map common domains to tracker names
+                    domain_mapping = {
+                        'blutopia.cc': 'BLU',
+                        'beyond-hd.me': 'BHD', 
+                        'aither.cc': 'AITHER',
+                        'anthelion.me': 'ANT',
+                        'hdbits.org': 'HDB',
+                        'passthepopcorn.me': 'PTP',
+                        'morethantv.me': 'MTV',
+                        'torrentleech.org': 'TL',
+                        'tleechreload.org': 'TL',
+                        'filelist.io': 'FL',
+                        'cathode-ray.tube': 'CRT'
+                    }
+                    
+                    normalized_tracker = None
+                    for domain, tracker_abbrev in domain_mapping.items():
+                        if domain in tracker_domain:
+                            normalized_tracker = tracker_abbrev
+                            break
+                    
+                    if not normalized_tracker:
+                        # Try to extract from subdomain or path
+                        if 'blutopia' in tracker_domain:
+                            normalized_tracker = 'BLU'
+                        elif 'beyond-hd' in tracker_domain:
+                            normalized_tracker = 'BHD'
+                        # Add more fallback patterns as needed
+                    
+                    if normalized_tracker:
+                        name_to_info[name]['found_trackers'].add(normalized_tracker)
+                else:
+                    # Direct tracker name
+                    normalized = normalize_tracker_name(tracker)
+                    if normalized:
+                        name_to_info[name]['found_trackers'].add(normalized)
         
         print()  # New line after progress bar
         
@@ -417,8 +463,6 @@ def get_torrents_with_paths():
             normalized = normalize_tracker_name(tracker_name)
             
             if not normalized:
-                # Debug: print unrecognized tracker names
-                print(f"\n⚠️  Unrecognized tracker in guid: {guid} (extracted: {tracker_name})")
                 continue
             
             # Look up torrent name by info_hash
@@ -570,72 +614,80 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     return filename
 
 def debug_database_content(limit=10):
-    """Debug function to inspect database content."""
+    """Debug function to inspect database content and write to file."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    appdata_dir = Path(LOG_DIR)
+    appdata_dir.mkdir(parents=True, exist_ok=True)
+    debug_file = appdata_dir / f"debug_output_{timestamp}.txt"
+    
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print("🔍 DEBUG: Database Analysis")
-        print("=" * 50)
-        
-        # Check client_searchee table
-        cursor.execute("SELECT COUNT(*) FROM client_searchee")
-        searchee_count = cursor.fetchone()[0]
-        print(f"Total client_searchee records: {searchee_count}")
-        
-        cursor.execute("SELECT COUNT(*) FROM client_searchee WHERE save_path IS NOT NULL AND save_path != ''")
-        searchee_with_paths = cursor.fetchone()[0]
-        print(f"client_searchee with paths: {searchee_with_paths}")
-        
-        # Check decision table
-        cursor.execute("SELECT COUNT(*) FROM decision")
-        decision_count = cursor.fetchone()[0]
-        print(f"Total decision records: {decision_count}")
-        
-        # Check distinct decision types
-        cursor.execute("SELECT decision, COUNT(*) FROM decision GROUP BY decision ORDER BY COUNT(*) DESC")
-        decision_types = cursor.fetchall()
-        print(f"Decision types:")
-        for decision_type, count in decision_types:
-            print(f"  {decision_type}: {count}")
-        
-        # Sample GUIDs and their tracker names
-        print(f"\nSample GUIDs (first {limit}):")
-        cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL LIMIT ?", (limit,))
-        for row in cursor.fetchall():
-            guid = row[0]
-            tracker_name = guid.split('.')[0] if '.' in guid else guid
-            normalized = normalize_tracker_name(tracker_name)
-            print(f"  {guid} -> {tracker_name} -> {normalized}")
-        
-        # Check for successful matches
-        success_placeholders = ','.join(['?' for _ in SUCCESS_DECISIONS])
-        cursor.execute(f"SELECT COUNT(*) FROM decision WHERE decision IN ({success_placeholders})", SUCCESS_DECISIONS)
-        success_count = cursor.fetchone()[0]
-        print(f"\nSuccessful decisions ({', '.join(SUCCESS_DECISIONS)}): {success_count}")
-        
-        if success_count > 0:
-            cursor.execute(f"""
-                SELECT d.guid, d.decision, COUNT(*)
-                FROM decision d
-                WHERE d.decision IN ({success_placeholders})
-                GROUP BY d.guid, d.decision
-                ORDER BY COUNT(*) DESC
-                LIMIT ?
-            """, SUCCESS_DECISIONS + [limit])
+        with open(debug_file, 'w') as f:
+            f.write("🔍 DEBUG: Database Analysis\n")
+            f.write("=" * 50 + "\n")
             
-            print("Top successful tracker/decision combinations:")
-            for guid, decision, count in cursor.fetchall():
+            # Check client_searchee table
+            cursor.execute("SELECT COUNT(*) FROM client_searchee")
+            searchee_count = cursor.fetchone()[0]
+            f.write(f"Total client_searchee records: {searchee_count}\n")
+            
+            cursor.execute("SELECT COUNT(*) FROM client_searchee WHERE save_path IS NOT NULL AND save_path != ''")
+            searchee_with_paths = cursor.fetchone()[0]
+            f.write(f"client_searchee with paths: {searchee_with_paths}\n")
+            
+            # Check decision table
+            cursor.execute("SELECT COUNT(*) FROM decision")
+            decision_count = cursor.fetchone()[0]
+            f.write(f"Total decision records: {decision_count}\n")
+            
+            # Check distinct decision types
+            cursor.execute("SELECT decision, COUNT(*) FROM decision GROUP BY decision ORDER BY COUNT(*) DESC")
+            decision_types = cursor.fetchall()
+            f.write(f"Decision types:\n")
+            for decision_type, count in decision_types:
+                f.write(f"  {decision_type}: {count}\n")
+            
+            # Sample GUIDs and their tracker names
+            f.write(f"\nSample GUIDs (first {limit}):\n")
+            cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL LIMIT ?", (limit,))
+            for row in cursor.fetchall():
+                guid = row[0]
                 tracker_name = guid.split('.')[0] if '.' in guid else guid
                 normalized = normalize_tracker_name(tracker_name)
-                print(f"  {guid} ({normalized}) - {decision}: {count}")
+                f.write(f"  {guid} -> {tracker_name} -> {normalized}\n")
+            
+            # Check for successful matches
+            success_placeholders = ','.join(['?' for _ in SUCCESS_DECISIONS])
+            cursor.execute(f"SELECT COUNT(*) FROM decision WHERE decision IN ({success_placeholders})", SUCCESS_DECISIONS)
+            success_count = cursor.fetchone()[0]
+            f.write(f"\nSuccessful decisions ({', '.join(SUCCESS_DECISIONS)}): {success_count}\n")
+            
+            if success_count > 0:
+                cursor.execute(f"""
+                    SELECT d.guid, d.decision, COUNT(*)
+                    FROM decision d
+                    WHERE d.decision IN ({success_placeholders})
+                    GROUP BY d.guid, d.decision
+                    ORDER BY COUNT(*) DESC
+                    LIMIT ?
+                """, SUCCESS_DECISIONS + [limit])
+                
+                f.write("Top successful tracker/decision combinations:\n")
+                for guid, decision, count in cursor.fetchall():
+                    tracker_name = guid.split('.')[0] if '.' in guid else guid
+                    normalized = normalize_tracker_name(tracker_name)
+                    f.write(f"  {guid} ({normalized}) - {decision}: {count}\n")
+            
+            f.write("=" * 50 + "\n")
         
         conn.close()
-        print("=" * 50)
+        print(f"🔍 Debug output written to: {debug_file}")
         
     except Exception as e:
         print(f"Error in debug function: {e}")
-
+        
 def main():
     parser = argparse.ArgumentParser(
         description= "Cross-Pollinator: Analyze your missing Torrents. Note this is a build line for existing torrents on trackers. If you need to change titling, add -tmdb TV/number or -tmdb movie/number or -tvdb number"
