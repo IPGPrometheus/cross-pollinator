@@ -78,7 +78,7 @@ TRACKER_MAPPING = {
     'NM': ['NM', 'nostream'],
     'OE': ['OE', 'onlyencodes'],
     'OPS': ['OPS', 'orpheus'],
-    'OTW': ['OTW', 'oldtoons'],
+    'OTW': ['OTW', 'oldtoons.world'],
     'PB': ['PB', 'privatebits'],
     'PHD': ['PHD', 'privatehd'],
     'PirateTheNet': ['PirateTheNet', 'piratethenet'],
