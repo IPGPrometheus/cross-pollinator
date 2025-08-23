@@ -20,54 +20,94 @@ DB_PATH = "/cross-seed/cross-seed.db"
 # Use environment variable or default to /logs (writable volume)
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
 
-# Comprehensive tracker mapping
+# Comprehensive tracker mapping - Updated with more trackers and variants
 TRACKER_MAPPING = {
     'ACM': ['ACM', 'eiga'],
-    'AITHER': ['AITHER', 'aither'], 
+    'AITHER': ['AITHER', 'aither', 'aither.cc'], 
     'AL': ['AL', 'animelovers'],
-    'ANT': ['ANT', 'anthelion'],
+    'ANT': ['ANT', 'anthelion', 'anthelion.me'],
     'AR': ['AR', 'alpharatio'],
-    'BHD': ['BHD', 'beyond-hd'],
+    'AST': ['AST', 'asiancinema'],
+    'ATH': ['ATH', 'asgaard'],
+    'AVHD': ['AVHD'],
+    'BB': ['BB', 'brokenstones'],
+    'BHD': ['BHD', 'beyond-hd', 'beyond-hd.me'],
     'BHDTV': ['BHDTV', 'bit-hdtv'],
-    'BLU': ['BLU', 'blutopia'],
+    'BLU': ['BLU', 'blutopia', 'blutopia.cc'],
+    'BTN': ['BTN', 'broadcasthe.net'],
     'CBR': ['CBR', 'capybarabr'],
-    'CRT': ['CRT', 'cathode-ray.tube', 'signal.cathode-ray.tube'],
+    'CG': ['CG', 'cinemageddon'],
+    'CHD': ['CHD', 'chdbits'],
+    'CinemaZ': ['CinemaZ', 'cinemaz'],
+    'DT': ['DT', 'desitorrents'],
     'DP': ['DP', 'darkpeers'],
-    'FL': ['FL', 'filelist', 'FileList', 'reactor.filelist.io', 'reactor.thefl.org'],
+    'EMT': ['EMT', 'empornium'],
     'FNP': ['FNP', 'fearnopeer'],
+    'FL': ['FL', 'filelist', 'FileList'],
     'FRIKI': ['FRIKI', 'frikibar'],
-    'HDB': ['HDB', 'hdbits'],
+    'GGn': ['GGn', 'gazellegames'],
+    'GPW': ['GPW', 'great-poisoned-world'],
+    'HDB': ['HDB', 'hdbits', 'hdbits.org'],
+    'HDC': ['HDC', 'hd-center'],
+    'HDF': ['HDF', 'hd-forever'],
+    'HDH': ['HDH', 'hdhome'],
     'HDT': ['HDT', 'hdts-announce'],
+    'HDU': ['HDU', 'hd-united'],
     'HHD': ['HHD', 'homiehelpdesk'],
+    'HPF': ['HPF', 'harrypotterfan'],
     'HUNO': ['HUNO', 'hawke'],
+    'iAnon': ['iAnon'],
+    'ICE': ['ICE', 'icetorrent'],
+    'IPT': ['IPT', 'iptorrents'],
     'ITT': ['ITT', 'itatorrents'],
+    'JPopsuki': ['JPopsuki'],
+    'KG': ['KG', 'karagarga'],
     'LCD': ['LCD', 'locadora'],
     'LST': ['LST', 'lst'],
     'LT': ['LT', 'lat-team'],
-    'MTV': ['MTV', 'morethantv'],
+    'MAM': ['MAM', 'myanonamouse'],
+    'ME': ['ME', 'milkie'],
+    'MTV': ['MTV', 'morethantv', 'morethantv.me'],
+    'MTeam': ['MTeam'],
     'NBL': ['NBL', 'nebulance'],
+    'NC': ['NC', 'norbits'],
+    'NM': ['NM', 'nostream'],
     'OE': ['OE', 'onlyencodes'],
+    'OPS': ['OPS', 'orpheus'],
     'OTW': ['OTW', 'oldtoons'],
+    'PB': ['PB', 'privatebits'],
+    'PHD': ['PHD', 'privatehd'],
+    'PirateTheNet': ['PirateTheNet', 'piratethenet'],
     'PSS': ['PSS', 'privatesilverscreen'],
     'PT': ['PT', 'portugas'],
     'PTER': ['PTER'],
-    'PTP': ['PTP'],
+    'PTP': ['PTP', 'passthepopcorn.me'],
     'PTT': ['PTT', 'polishtorrent'],
     'R4E': ['R4E', 'racing4everyone'],
     'RAS': ['RAS', 'rastastugan'],
+    'RED': ['RED', 'redacted'],
     'RF': ['RF', 'reelflix'],
     'RTF': ['RTF', 'retroflix'],
     'SAM': ['SAM', 'samaritano'],
+    'SC': ['SC', 'scenetime'],
     'SN': ['SN', 'swarmazon'],
-    'SP': ['SP', 'seedpool'],
+    'SPD': ['SPD', 'speedapp'],
     'STC': ['STC', 'skipthecommericals'],
+    'THC': ['THC', 'thehorrorcult'],
     'THR': ['THR', 'torrenthr'],
     'TIK': ['TIK', 'cinematik'],
-    'TL': ['TL', 'torrentleech', 'tracker.tleechreload.org', 'tracker.torrentleech.org'],
+    'TL': ['TL', 'torrentleech', 'tleechreload.org', 'torrentleech.org'],
     'TOCA': ['TOCA', 'tocashare'],
+    'TS': ['TS', 'torrentseeds'],
+    'TSP': ['TSP', 'thesceneplace'],
+    'TVC': ['TVC', 'tvchaosuk'],
+    'TVV': ['TVV', 'tv-vault'],
     'UHD': ['UHD', 'uhdshare'],
     'ULCX': ['ULCX', 'upload'],
     'UTP': ['UTP'],
+    'WCD': ['WCD', 'whatcd'],
+    'x264': ['x264'],
+    'XS': ['XS', 'xspeeds'],
     'YOINK': ['YOINK', 'yoinked'],
     'YUS': ['YUS', 'yu-scene']
 }
@@ -76,7 +116,7 @@ TRACKER_MAPPING = {
 ANIME_TRACKERS = {'AL', 'ACM'}
 
 # General movie/TV trackers that should be excluded from anime content
-GENERAL_TRACKERS = {'PTP', 'HDB', 'BLU', 'BHD', 'AITHER', 'ANT', 'MTV', 'FL', 'TL'}
+GENERAL_TRACKERS = {'PTP', 'HDB', 'BLU', 'BHD', 'AITHER', 'ANT', 'MTV', 'FL', 'TL', 'BTN', 'PHD'}
 
 SUCCESS_DECISIONS = ['MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS']
 
@@ -128,6 +168,24 @@ def normalize_tracker_name(raw_name):
         name = name[:-6]
     if name.startswith('FileList-'):
         return 'FL'
+    
+    # Special handling for tracker URLs (common in client_searchee)
+    if 'tleechreload.org' in name or 'torrentleech.org' in name:
+        return 'TL'
+    if 'blutopia.cc' in name:
+        return 'BLU'
+    if 'beyond-hd.me' in name:
+        return 'BHD'
+    if 'aither.cc' in name:
+        return 'AITHER'
+    if 'anthelion.me' in name:
+        return 'ANT'
+    if 'hdbits.org' in name:
+        return 'HDB'
+    if 'passthepopcorn.me' in name:
+        return 'PTP'
+    if 'morethantv.me' in name:
+        return 'MTV'
     
     for abbrev, variants in TRACKER_MAPPING.items():
         if name in variants or name.lower() in [v.lower() for v in variants]:
