@@ -1,0 +1,6 @@
+pymediainfo
+torf
+requests
+click
+rich
+python-dotenv
