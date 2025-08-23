@@ -215,38 +215,35 @@ def normalize_tracker_name(raw_name):
     print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{host}'")
     return None
 
-def normalize_content_name(filename):
-    """Normalize content name for duplicate detection."""
-    # Remove file extension
-    name = Path(filename).stem
-    
-    # Remove common quality/format indicators
-    quality_patterns = [
-        r'\.\d{3,4}p\.',  # .1080p., .720p., etc.
-        r'\.BluRay\.',
-        r'\.WEB-DL\.',
-        r'\.WEBRip\.',
-        r'\.BDRip\.',
-        r'\.DVDRip\.',
-        r'\.AMZN\.',
-        r'\.FLUX\.',
-        r'\.ATMOS\.',
-        r'\.DDP\d+\.\d+\.',  # .DDP5.1.
-        r'\.H\.264-',
-        r'\.x264-',
-        r'\.x265-',
-        r'-[A-Z0-9]+$',  # Release group at end
-    ]
-    
-    normalized = name
-    for pattern in quality_patterns:
-        normalized = re.sub(pattern, '.', normalized, flags=re.IGNORECASE)
-    
-    # Clean up multiple dots and normalize
-    normalized = re.sub(r'\.+', '.', normalized)
-    normalized = normalized.strip('.')
-    
-    return normalized.lower()
+def normalize_tracker_name(raw_name):
+    """Normalize tracker names to standard abbreviations using TRACKER_MAPPING."""
+    name = raw_name.strip()
+    original_name = name
+
+    if name.startswith('Filelist-'):
+        return 'FL'
+
+    host = name.lower()
+    if name.startswith('http'):
+        try:
+            parsed = urlparse(name)
+            host = parsed.netloc.lower()
+        except Exception:
+            pass
+
+    # Strip leading www.
+    if host.startswith("www."):
+        host = host[4:]
+
+    # Match against TRACKER_MAPPING
+    for abbrev, variants in TRACKER_MAPPING.items():
+        for variant in variants:
+            v = variant.lower()
+            if v in host or host in v:
+                return abbrev
+
+    print(f"🔍 DEBUG: Could not normalize tracker '{original_name}' -> '{host}'")
+    return None
 
 def get_active_trackers():
     """Get trackers that you actually have successful uploads/downloads on."""
@@ -256,10 +253,9 @@ def get_active_trackers():
         
         # Get trackers where you have successful matches (indicating you're active on them)
         cursor.execute("""
-            SELECT DISTINCT guid 
-            FROM decision 
-            WHERE decision IN ('MATCH', 'MATCH_SIZE_ONLY', 'MATCH_PARTIAL', 'INFO_HASH_ALREADY_EXISTS')
-            AND guid IS NOT NULL
+            SELECT DISTINCT value
+            FROM client_searchee, json_each(client_searchee.trackers)
+            WHERE value IS NOT NULL AND value != ''
         """)
         
         active_trackers = set()
@@ -278,16 +274,15 @@ def get_active_trackers():
         return []
 
 def get_all_configured_trackers():
-    """Get all configured trackers from client_searchee table (not decisions)."""
+    """Get all configured trackers from client_searchee.trackers (JSON)."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # Pull from client_searchee.tracker instead of decision.guid
         cursor.execute("""
-            SELECT DISTINCT tracker 
-            FROM client_searchee 
-            WHERE tracker IS NOT NULL AND tracker != ''
+            SELECT DISTINCT value
+            FROM client_searchee, json_each(client_searchee.trackers)
+            WHERE value IS NOT NULL AND value != ''
         """)
         
         trackers = set()
