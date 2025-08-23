@@ -190,9 +190,12 @@ def normalize_tracker_name(raw_name):
     # Special case: FileList shorthand
     if name.startswith('Filelist-'):
         return 'FL'
-
+    
+    if host.startswith("https://www."):
+        host = host[4:]
+    
     # If it's a URL, extract hostname
-    if name.startswith('http'):
+    if name.startswith('https://'):
         try:
             parsed = urlparse(name)
             host = parsed.netloc.lower()
@@ -275,24 +278,28 @@ def get_active_trackers():
         return []
 
 def get_all_configured_trackers():
-    """Get all configured trackers from database decisions."""
+    """Get all configured trackers from client_searchee table (not decisions)."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+
+        # Pull from client_searchee.tracker instead of decision.guid
+        cursor.execute("""
+            SELECT DISTINCT tracker 
+            FROM client_searchee 
+            WHERE tracker IS NOT NULL AND tracker != ''
+        """)
         
-        cursor.execute("SELECT DISTINCT guid FROM decision WHERE guid IS NOT NULL")
         trackers = set()
-        
         for row in cursor.fetchall():
-            guid = row[0]
-            tracker_name = guid.split('.')[0] if '.' in guid else guid
-            normalized = normalize_tracker_name(tracker_name)
+            tracker_url = row[0]
+            normalized = normalize_tracker_name(tracker_url)
             if normalized:
                 trackers.add(normalized)
         
         conn.close()
         return sorted(trackers)
-        
+
     except Exception as e:
         print(f"Error getting configured trackers: {e}")
         return []
