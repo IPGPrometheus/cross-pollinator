@@ -516,7 +516,7 @@ def prompt_category_filter(available_categories, config):
         if choice == 'Y':
             return available_categories  # Return all categories
         elif choice == 'N':
-            print(f"\nPlease select which categories to ignore (comma-separated):")
+            print(f"\nPlease select which categories to filter by (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
@@ -827,11 +827,10 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
                 if item.get('is_season') and item.get('episode_count'):
                     f.write(f"# Season with {item['episode_count']} episodes\n")
                 
-                # Show consolidated episodes if any
+                # Always show consolidated episodes and duplicates in file output
                 if item.get('consolidated_episodes'):
                     f.write(f"# Consolidated episodes: {', '.join(item['consolidated_episodes'])}\n")
                 
-                # Show duplicates if any
                 if item.get('duplicates'):
                     f.write(f"# Duplicates: {', '.join(item['duplicates'])}\n")
                 
@@ -961,6 +960,22 @@ def show_config_info(config):
     print(f"\nConfig file location: {CONFIG_FILE}")
     print("Edit the config file to change these settings.\n")
 
+class Colors:
+    """ANSI color codes for terminal output."""
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+    
+    @classmethod
+    def disable(cls):
+        """Disable colors (for clean output or non-terminal environments)."""
+        cls.GREEN = cls.YELLOW = cls.RED = cls.BLUE = cls.CYAN = cls.WHITE = cls.BOLD = cls.END = ''
+
 def main():
     parser = argparse.ArgumentParser(
         description="Cross-Pollinator: Analyze missing torrents using cross-seed database (with folder support)"
@@ -971,8 +986,13 @@ def main():
     parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
     parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
+    parser.add_argument('--verbose-output', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
     
     args = parser.parse_args()
+    
+    # Disable colors for clean output or output generation
+    if args.output_clean or args.output is not None:
+        Colors.disable()
     
     if args.show_config:
         # Load config without available trackers for display
@@ -1018,45 +1038,54 @@ def main():
     
     # Display results unless clean output requested
     if not args.output_clean:
-        print("\nMissing Video Content by Tracker:")
+        print(f"\n{Colors.BOLD}Missing Video Content by Tracker:{Colors.END}")
         print("=" * 80)
         
         for group_name, group_results in grouped_results.items():
             if len(grouped_results) > 1:  # Only show group headers if we have multiple groups
-                print(f"\n{'='*20} {group_name.upper()} CONTENT {'='*20}")
-                print(f"Found {len(group_results)} items in this category\n")
+                print(f"\n{Colors.CYAN}{'='*20} {group_name.upper()} CONTENT {'='*20}{Colors.END}")
+                print(f"{Colors.WHITE}Found {len(group_results)} items in this category{Colors.END}\n")
             
             for item in sorted(group_results, key=lambda x: x['name'].lower()):
-                print(f"\n{item['name']}")
+                # Torrent name in green
+                print(f"\n{Colors.GREEN}{Colors.BOLD}{item['name']}{Colors.END}")
                 
                 # Show season information
                 if item.get('is_season') and item.get('episode_count'):
-                    print(f"   Type: Season ({item['episode_count']} episodes)")
+                    print(f"   {Colors.WHITE}Type: Season ({item['episode_count']} episodes){Colors.END}")
                 elif item.get('is_season'):
-                    print(f"   Type: Season")
+                    print(f"   {Colors.WHITE}Type: Season{Colors.END}")
                 elif Path(item['name']).suffix:
-                    print(f"   Type: Single file")
+                    print(f"   {Colors.WHITE}Type: Single file{Colors.END}")
                 else:
-                    print(f"   Type: Folder")
+                    print(f"   {Colors.WHITE}Type: Folder{Colors.END}")
                 
-                # Show consolidated episodes
-                if item.get('consolidated_episodes'):
-                    print(f"   Consolidated episodes: {', '.join(item['consolidated_episodes'])}")
+                # Verbose output only information
+                if args.verbose_output:
+                    # Show consolidated episodes
+                    if item.get('consolidated_episodes'):
+                        print(f"   {Colors.BLUE}Consolidated episodes: {', '.join(item['consolidated_episodes'])}{Colors.END}")
+                    
+                    # Show duplicates
+                    if item.get('duplicates'):
+                        print(f"   {Colors.BLUE}Duplicates detected: {', '.join(item['duplicates'])}{Colors.END}")
                 
-                # Show duplicates
-                if item.get('duplicates'):
-                    print(f"   Duplicates detected: {', '.join(item['duplicates'])}")
-                
-                print(f"   Path: {item['path']}")
+                print(f"   {Colors.WHITE}Path: {item['path']}{Colors.END}")
                 
                 if item.get('categories'):
-                    print(f"   Categories: {', '.join(item['categories'])}")
+                    print(f"   {Colors.WHITE}Categories: {', '.join(item['categories'])}{Colors.END}")
                     
-                print(f"   Missing from: {', '.join(item['missing_trackers']) if item['missing_trackers'] else 'None'}")
-                if item['found_trackers']:
-                    print(f"   Found on: {', '.join(item['found_trackers'])}")
+                # Missing trackers in red
+                if item['missing_trackers']:
+                    print(f"   {Colors.RED}Missing from: {', '.join(item['missing_trackers'])}{Colors.END}")
                 else:
-                    print(f"   Found on: None")
+                    print(f"   {Colors.WHITE}Missing from: None{Colors.END}")
+                
+                # Found trackers in yellow
+                if item['found_trackers']:
+                    print(f"   {Colors.YELLOW}Found on: {', '.join(item['found_trackers'])}{Colors.END}")
+                else:
+                    print(f"   {Colors.WHITE}Found on: None{Colors.END}")
     
     # Generate upload commands if requested
     if args.output is not None:
