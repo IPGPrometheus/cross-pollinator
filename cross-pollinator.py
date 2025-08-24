@@ -26,7 +26,7 @@ load_dotenv()
 CROSS_SEED_DIR = os.environ.get('CROSS_SEED_DIR', '/cross-seed')
 DB_PATH = os.path.join(CROSS_SEED_DIR, 'cross-seed.db')
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
+CONFIG_DIR = os.environ.get('CROSS_POLLINATOR_CONFIG_DIR', 'config')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'cross-pollinator-config.ini')
 
 # Comprehensive tracker mapping - Updated with exact domain matches first
@@ -212,7 +212,7 @@ def get_enabled_trackers_from_config(config, available_trackers):
 
 def is_single_episode(filename, config):
     """Check if filename appears to be a single episode based on config patterns."""
-    patterns = config['FILTERING'].get('single_episode_patterns', 'S\\d{2}E\\d{2},EP?\\d+,Episode\\s*\\d+').split(',')
+    patterns = config['FILTERING'].get('single_episode_patterns', 'S\d{2}E\d{2},EP?\d+,Episode\s*\d+,\d{4}[.\-]\d{2}[.\-]\d{2}').split(',')
     filename_lower = filename.lower()
     
     for pattern in patterns:
