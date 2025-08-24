@@ -516,7 +516,7 @@ def prompt_category_filter(available_categories, config):
         if choice == 'Y':
             return available_categories  # Return all categories
         elif choice == 'N':
-            print(f"\nPlease select which categories to filter by (comma-separated):")
+            print(f"\nPlease select which categories to ignore (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
