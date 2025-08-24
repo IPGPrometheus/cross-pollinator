@@ -510,14 +510,14 @@ def prompt_category_filter(available_categories, config):
             return valid_defaults
     
     print(f"\nFound categories: {', '.join(available_categories)}")
-    print("\nDo you want to filter by all categories? Y/N")
+    print("\nDo you want to show all categories? Y/N")
     
     while True:
         choice = input().strip().upper()
         if choice == 'Y':
             return available_categories  # Return all categories
         elif choice == 'N':
-            print(f"\nPlease select which categories to filter by (comma-separated):")
+            print(f"\nPlease select which categories to remove from view (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
