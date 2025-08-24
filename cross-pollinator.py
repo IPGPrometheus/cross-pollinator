@@ -27,7 +27,7 @@ CROSS_SEED_DIR = os.environ.get('CROSS_SEED_DIR', '/cross-seed')
 DB_PATH = os.path.join(CROSS_SEED_DIR, 'cross-seed.db')
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
 CONFIG_DIR = os.environ.get('CROSS_POLLINATOR_CONFIG_DIR', '/config')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'cross-pollinator-config.ini')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'cross-pollinator-config.txt')
 
 # Comprehensive tracker mapping - Updated with exact domain matches first
 TRACKER_MAPPING = {
