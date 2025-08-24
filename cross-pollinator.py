@@ -26,7 +26,8 @@ load_dotenv()
 CROSS_SEED_DIR = os.environ.get('CROSS_SEED_DIR', '/cross-seed')
 DB_PATH = os.path.join(CROSS_SEED_DIR, 'cross-seed.db')
 LOG_DIR = os.environ.get('CROSS_POLLINATOR_LOG_DIR', '/logs')
-CONFIG_FILE = os.path.join(LOG_DIR, 'cross-pollinator-config.ini')
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'cross-pollinator-config.ini')
 
 # Comprehensive tracker mapping - Updated with exact domain matches first
 TRACKER_MAPPING = {
@@ -131,13 +132,16 @@ TRACKER_MAPPING = {
     'YUS': ['YUS', 'yu-scene']
 }
 
-def create_default_config():
+def create_default_config(available_trackers=None):
     """Create a default configuration file."""
     config = configparser.ConfigParser()
     
+    # Use available trackers if provided, otherwise use a default list
+    default_trackers = ','.join(available_trackers) if available_trackers else 'BLU,AITHER,ANT,BHD,MTV,FL,TL,BTN,PHD'
+    
     # Default configuration sections
     config['TRACKERS'] = {
-        'enabled_trackers': 'BLU,AITHER,ANT,BHD,MTV,FL,TL,BTN,PHD',
+        'enabled_trackers': default_trackers,
         'disabled_trackers': '',
         'comment': '# Comma-separated list of tracker abbreviations to include/exclude'
     }
@@ -157,7 +161,7 @@ def create_default_config():
     
     return config
 
-def load_config():
+def load_config(available_trackers=None):
     """Load configuration from file, create default if doesn't exist."""
     config_path = Path(CONFIG_FILE)
     config = configparser.ConfigParser()
@@ -166,7 +170,7 @@ def load_config():
         print(f"Configuration file not found. Creating default config at: {CONFIG_FILE}")
         config_path.parent.mkdir(parents=True, exist_ok=True)
         
-        default_config = create_default_config()
+        default_config = create_default_config(available_trackers)
         with open(config_path, 'w') as f:
             default_config.write(f)
         config = default_config
@@ -479,51 +483,32 @@ def filter_results_by_categories(results, selected_categories):
 
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
-    name = Path(filename).stem
+    # This function has been removed as it's no longer needed
+    return Path(filename).stem.lower()
 
-    quality_patterns = [
-        r'\.\d{3,4}p\.',
-        r'\.BluRay\.',
-        r'\.WEB-DL\.',
-        r'\.WEBRip\.',
-        r'\.BDRip\.',
-        r'\.DVDRip\.',
-        r'\.AMZN\.',
-        r'\.FLUX\.',
-        r'\.ATMOS\.',
-        r'\.DDP\d+\.\d+\.',
-        r'\.H\.264-',
-        r'\.x264-',
-        r'\.x265-',
-        r'-[A-Z0-9]+$',
-    ]
-
-    normalized = name
-    for pattern in quality_patterns:
-        normalized = re.sub(pattern, '.', normalized, flags=re.IGNORECASE)
-
-    normalized = re.sub(r'\.+', '.', normalized).strip('.')
-    return normalized.lower()
-
-def analyze_missing_trackers(config):
+def analyze_missing_trackers():
     """Main function to analyze missing trackers using client_searchee table."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Build comprehensive domain to abbreviation mapping
+        # Step 1: Build comprehensive domain to abbreviation mapping
         domain_to_abbrev, available_trackers = build_comprehensive_tracker_mapping()
         
         if not available_trackers:
             print("No trackers found in database that match TRACKER_MAPPING")
             return [], []
         
+        # Step 2: Load configuration with available trackers
+        print("\nStep 2: Loading configuration...")
+        config = load_config(available_trackers)
+        
         # Filter trackers based on config
         enabled_trackers = get_enabled_trackers_from_config(config, available_trackers)
         print(f"Enabled trackers for cross-seeding: {', '.join(enabled_trackers)}")
         
         # Get all torrents with their tracker lists, paths, and categories
-        print("\nStep 2: Analyzing torrents and their tracker coverage...")
+        print("\nStep 3: Analyzing torrents and their tracker coverage...")
         cursor.execute("""
             SELECT name, info_hash, save_path, trackers, category
             FROM client_searchee
@@ -597,7 +582,7 @@ def analyze_missing_trackers(config):
                 found_relevant_trackers = sorted(found_trackers & set(relevant_trackers))
                 
                 if missing_trackers or found_relevant_trackers:
-                    # Group by normalized name to handle duplicates
+                    # Simplified grouping without complex normalization
                     normalized_name = normalize_content_name(name)
                     content_groups[normalized_name].append({
                         'name': name,
@@ -616,7 +601,7 @@ def analyze_missing_trackers(config):
         print()  # New line after progress bar
         
         # Process content groups and handle duplicates
-        print("Step 3: Processing content groups and handling duplicates...")
+        print("Step 4: Processing content groups and handling duplicates...")
         processed_content = set()
         
         for normalized_name, items in content_groups.items():
@@ -818,10 +803,9 @@ def main():
     
     args = parser.parse_args()
     
-    # Load configuration
-    config = load_config()
-    
     if args.show_config:
+        # Load config without available trackers for display
+        config = load_config()
         show_config_info(config)
         if not args.run and not args.debug_trackers:
             return
@@ -842,7 +826,7 @@ def main():
         print()
     
     print("Analyzing cross-seed database for missing torrents...")
-    results, all_categories = analyze_missing_trackers(config)
+    results, all_categories = analyze_missing_trackers()
     
     if not results:
         print("No torrents found needing upload to additional trackers")
@@ -855,6 +839,8 @@ def main():
     grouped_results = {'all': results}
     
     if not args.no_filter and all_categories:
+        # Load config for category filtering
+        config = load_config()
         selected_categories = prompt_category_filter(all_categories, config)
         if selected_categories:
             grouped_results = filter_results_by_categories(results, selected_categories)
