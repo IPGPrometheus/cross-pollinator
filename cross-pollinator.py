@@ -381,14 +381,14 @@ def extract_unique_trackers_from_db():
         return []
 
 def extract_unique_categories_from_db():
-    """Extract all unique categories from the database."""
+    """Extract all unique categories from the database (from entire client_searchee table)."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print("Extracting unique categories from database...")
+        print("Extracting all unique categories from database...")
         
-        # Get all categories from database
+        # Get ALL categories from database, not just filtered ones
         cursor.execute("""
             SELECT DISTINCT category
             FROM client_searchee
@@ -406,6 +406,7 @@ def extract_unique_categories_from_db():
                 unique_categories.update(categories)
         
         conn.close()
+        print(f"Found {len(unique_categories)} unique categories in database: {', '.join(sorted(unique_categories))}")
         return sorted(unique_categories)
         
     except Exception as e:
@@ -1019,7 +1020,12 @@ def main():
     print("Analyzing cross-seed database for missing torrents (including folders/seasons)...")
     results, all_categories = analyze_missing_trackers()
     
+    # Get ALL categories from database for filtering options (not just from results)
+    all_db_categories = extract_unique_categories_from_db()
+    
     if not results:
+        print("No torrents found needing upload to additional trackers")
+        return
         print("No torrents found needing upload to additional trackers")
         return
     
@@ -1029,10 +1035,11 @@ def main():
     selected_categories = None
     grouped_results = {'all': results}
     
-    if not args.no_filter and all_categories:
+    if not args.no_filter and all_db_categories:
         # Load config for category filtering
         config = load_config()
-        selected_categories = prompt_category_filter(all_categories, config)
+        # Use all database categories for filtering options, not just result categories
+        selected_categories = prompt_category_filter(all_db_categories, config)
         if selected_categories:
             grouped_results = filter_results_by_categories(results, selected_categories)
     
