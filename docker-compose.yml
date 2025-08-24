@@ -6,7 +6,7 @@ services:
     image: cross-pollinator:latest
     container_name: cross-pollinator
     volumes:
-      - ./config:/config
+      - ./config:/app/config
       - ${CROSS_SEED_DIR:-/mnt/user/appdata/cross-seed}:/cross-seed:ro
       - ./logs:/logs
     environment:
