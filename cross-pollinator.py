@@ -149,7 +149,7 @@ def create_default_config(available_trackers=None):
     config['FILTERING'] = {
         'include_single_episodes': 'false',
         'exclude_single_episodes': 'true',
-        'single_episode_patterns': 'S\\d{2}E\\d{2},EP?\\d+,Episode\\s*\\d+',
+        'single_episode_patterns': 'S\d{2}E\d{2},EP?\d+,Episode\s*\d+,\d{4}[.\-]\d{2}[.\-]\d{2}'
         'comment': '# Set include_single_episodes=true to include single episodes, false to exclude'
     }
     
