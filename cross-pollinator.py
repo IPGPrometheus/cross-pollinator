@@ -793,13 +793,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Cross-Pollinator: Analyze missing torrents using cross-seed database"
     )
-    parser.add_argument('--run', action='store_true', help='Run analysis and show missing torrents')
+    parser.add_argument('-run', action='store_true', help='Run analysis and show missing torrents')
     parser.add_argument('--output', nargs='?', const='default', help='Generate upload commands file (optional filename)')
-    parser.add_argument('--no-emoji', action='store_true', help='Remove all emojis from output')
-    parser.add_argument('--output-clean', action='store_true', help='Generate clean output with only upload commands')
-    parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
+    parser.add_argument('--clean', action='store_true', help='Generate clean output with only upload commands')
+    parser.add_argument('--trackers', action='store_true', help='Show detailed tracker mapping analysis')
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
-    parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
+    parser.add_argument('--config', action='store_true', help='Display current configuration settings')
     
     args = parser.parse_args()
     
