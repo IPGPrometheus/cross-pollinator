@@ -581,25 +581,42 @@ def filter_results_by_categories(results, selected_categories):
         item_categories = result.get('categories', [])
         matched_any = False
         
+        # Debug: Print what we're checking
+        print(f"DEBUG: Checking item '{result['name']}' with categories: {item_categories}")
+        
         # Check if any of the item's categories match any of the selected categories
-        for category in selected_categories:
-            # Case-insensitive matching
-            if any(cat.lower() == category.lower() for cat in item_categories):
-                grouped_results[category].append(result)
-                matched_any = True
+        for selected_cat in selected_categories:
+            for item_cat in item_categories:
+                # Case-insensitive matching and strip whitespace
+                if selected_cat.lower().strip() == item_cat.lower().strip():
+                    print(f"DEBUG: Match found! '{selected_cat}' matches '{item_cat}'")
+                    grouped_results[selected_cat].append(result)
+                    matched_any = True
+                    break
+            if matched_any:
                 break  # Only add to first matching category group
         
         if not matched_any:
+            print(f"DEBUG: No match found for '{result['name']}' - adding to 'other'")
             grouped_results['other'].append(result)
     
     # Remove empty groups
     filtered_groups = {k: v for k, v in grouped_results.items() if v}
+    
+    # Debug: Show final results
+    for group_name, group_items in filtered_groups.items():
+        print(f"DEBUG: Group '{group_name}' has {len(group_items)} items")
     
     # If no results match selected categories, show warning
     if not filtered_groups or (len(filtered_groups) == 1 and 'other' in filtered_groups):
         print(f"Warning: No results found matching selected categories: {', '.join(selected_categories)}")
         if 'other' in filtered_groups:
             print(f"Found {len(filtered_groups['other'])} results not matching selected categories")
+            # Show some examples of what categories were found
+            example_cats = set()
+            for item in filtered_groups['other'][:5]:  # Show first 5 as examples
+                example_cats.update(item.get('categories', []))
+            print(f"Example categories found: {', '.join(sorted(example_cats))}")
     
     return filtered_groups
     
@@ -694,12 +711,16 @@ def analyze_missing_trackers():
                 # Skip folders that aren't seasons unless configured to include folders
                 continue
             
-            # Parse categories
+            # Parse categories - IMPROVED PARSING
             item_categories = []
             if category_data:
                 # Handle both single categories and comma-separated lists
-                categories = [cat.strip() for cat in str(category_data).split(',') if cat.strip()]
-                item_categories = categories
+                # Split by comma and clean up each category
+                raw_categories = str(category_data).split(',')
+                for cat in raw_categories:
+                    cleaned_cat = cat.strip()
+                    if cleaned_cat:  # Only add non-empty categories
+                        item_categories.append(cleaned_cat)
             
             # Add categories to our collection
             all_categories.update(item_categories)
@@ -731,7 +752,7 @@ def analyze_missing_trackers():
                         'path': save_path,
                         'missing_trackers': missing_trackers,
                         'found_trackers': found_relevant_trackers,
-                        'categories': item_categories,
+                        'categories': item_categories,  # This should now be properly parsed
                         'is_season': is_season,
                         'episode_count': episode_count,
                         'files_json': files_json
