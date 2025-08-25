@@ -569,56 +569,36 @@ def filter_results_by_categories(results, selected_categories):
     if not selected_categories:
         return {'all': results}
     
-    grouped_results = {}
-    
-    for category in selected_categories:
-        grouped_results[category] = []
-    
-    # Add an 'other' category for items that don't match any selected categories
-    grouped_results['other'] = []
+    # Create a single group with all matching results
+    matching_results = []
     
     for result in results:
         item_categories = result.get('categories', [])
-        matched_any = False
-        
-        # Debug: Print what we're checking
-        print(f"DEBUG: Checking item '{result['name']}' with categories: {item_categories}")
         
         # Check if any of the item's categories match any of the selected categories
         for selected_cat in selected_categories:
             for item_cat in item_categories:
                 # Case-insensitive matching and strip whitespace
                 if selected_cat.lower().strip() == item_cat.lower().strip():
-                    print(f"DEBUG: Match found! '{selected_cat}' matches '{item_cat}'")
-                    grouped_results[selected_cat].append(result)
-                    matched_any = True
-                    break
-            if matched_any:
-                break  # Only add to first matching category group
-        
-        if not matched_any:
-            print(f"DEBUG: No match found for '{result['name']}' - adding to 'other'")
-            grouped_results['other'].append(result)
+                    matching_results.append(result)
+                    break  # Break inner loop once we find a match
+            else:
+                continue  # Continue outer loop if no match found
+            break  # Break outer loop if match was found
     
-    # Remove empty groups
-    filtered_groups = {k: v for k, v in grouped_results.items() if v}
+    # If no results match selected categories, return empty dict to show nothing
+    if not matching_results:
+        print(f"No results found matching selected categories: {', '.join(selected_categories)}")
+        # Show some examples of what categories were actually found
+        example_cats = set()
+        for item in results[:10]:  # Show first 10 as examples
+            example_cats.update(item.get('categories', []))
+        if example_cats:
+            print(f"Available categories in results: {', '.join(sorted(example_cats))}")
+        return {}
     
-    # Debug: Show final results
-    for group_name, group_items in filtered_groups.items():
-        print(f"DEBUG: Group '{group_name}' has {len(group_items)} items")
-    
-    # If no results match selected categories, show warning
-    if not filtered_groups or (len(filtered_groups) == 1 and 'other' in filtered_groups):
-        print(f"Warning: No results found matching selected categories: {', '.join(selected_categories)}")
-        if 'other' in filtered_groups:
-            print(f"Found {len(filtered_groups['other'])} results not matching selected categories")
-            # Show some examples of what categories were found
-            example_cats = set()
-            for item in filtered_groups['other'][:5]:  # Show first 5 as examples
-                example_cats.update(item.get('categories', []))
-            print(f"Example categories found: {', '.join(sorted(example_cats))}")
-    
-    return filtered_groups
+    # Return matching results under a single key
+    return {'filtered': matching_results}
     
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
@@ -1101,10 +1081,10 @@ def main():
         if selected_categories:
             grouped_results = filter_results_by_categories(results, selected_categories)
             
-            # If filtering resulted in empty groups, fall back to showing all results
+            # If filtering resulted in empty groups, show message and exit
             if not grouped_results:
-                print("No results matched the selected categories. Showing all results.")
-                grouped_results = {'all': results}
+                print("No matching results to display.")
+                return
     
     # Display results unless clean output requested
     if not args.clean:
@@ -1118,10 +1098,7 @@ def main():
             print(f"{Colors.WHITE}Showing {total_filtered} of {len(results)} total results{Colors.END}")
         
         for group_name, group_results in grouped_results.items():
-            if len(grouped_results) > 1:  # Only show group headers if we have multiple groups
-                print(f"\n{Colors.CYAN}{'='*20} {group_name.upper()} CONTENT {'='*20}{Colors.END}")
-                print(f"{Colors.WHITE}Found {len(group_results)} items in this category{Colors.END}\n")
-            elif selected_categories:  # Show category name even for single group if filtering was applied
+            if selected_categories:  # Show filtering info when filtering was applied
                 print(f"\n{Colors.CYAN}{'='*20} FILTERED RESULTS {'='*20}{Colors.END}")
                 print(f"{Colors.WHITE}Found {len(group_results)} items matching selected categories{Colors.END}\n")
             
