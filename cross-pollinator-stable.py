@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Cross-Pollinator Uploader - Generate Upload Commands (Improved Tracker Mapping)
+Cross-Pollinator Uploader - Generate Upload Commands (Improved Tracker Mapping + Folder Support)
 
 Parses cross-seed database using client_searchee table to find missing trackers.
 Uses info_hash to match torrents and trackers column to determine missing trackers.
+Now supports both individual files and folder structures (seasons, collections, etc.).
 """
 import os
 import sqlite3
@@ -150,6 +151,8 @@ def create_default_config(available_trackers=None):
         'include_single_episodes': 'false',
         'exclude_single_episodes': 'true',
         'single_episode_patterns': 'S\d{2}E\d{2},EP?\d+,Episode\s*\d+,\d{4}[.\-]\d{2}[.\-]\d{2}',
+        'include_folders': 'true',
+        'prefer_seasons_over_episodes': 'true',
         'comment': '# Set include_single_episodes=true to include single episodes, false to exclude'
     }
     
@@ -181,7 +184,12 @@ def load_config(available_trackers=None):
         if 'TRACKERS' not in config:
             config['TRACKERS'] = {'enabled_trackers': '', 'disabled_trackers': ''}
         if 'FILTERING' not in config:
-            config['FILTERING'] = {'include_single_episodes': 'false', 'exclude_single_episodes': 'true'}
+            config['FILTERING'] = {
+                'include_single_episodes': 'false', 
+                'exclude_single_episodes': 'true',
+                'include_folders': 'true',
+                'prefer_seasons_over_episodes': 'true'
+            }
         if 'GENERAL' not in config:
             config['GENERAL'] = {'auto_filter_categories': 'false', 'default_categories': 'Movies,TV'}
     
@@ -232,6 +240,14 @@ def should_include_single_episodes(config):
         return False
     return include
 
+def should_include_folders(config):
+    """Check if folders should be included based on config."""
+    return config['FILTERING'].getboolean('include_folders', fallback=True)
+
+def should_prefer_seasons_over_episodes(config):
+    """Check if seasons should be preferred over individual episodes."""
+    return config['FILTERING'].getboolean('prefer_seasons_over_episodes', fallback=True)
+
 def print_progress_bar(current, total, start_time, prefix="Progress", length=50):
     """Print a progress bar with estimated time remaining."""
     if total == 0:
@@ -253,14 +269,80 @@ def print_progress_bar(current, total, start_time, prefix="Progress", length=50)
     
     print(f'\r{prefix}: |{bar}| {current}/{total} ({percent:.1%}) {eta_str}', end='', flush=True)
 
-def is_video_file(filename):
-    """Check if filename has a video file extension."""
+def is_season_from_files(files_json):
+    """Check if the torrent represents a season based on files structure."""
+    if not files_json:
+        return False, 0
+    
+    try:
+        files = json.loads(files_json)
+        if not isinstance(files, list) or len(files) <= 1:
+            return False, 0
+        
+        # Check if multiple files follow season/episode pattern
+        episode_count = 0
+        season_pattern = re.compile(r'S\d{2}E\d{2}', re.IGNORECASE)
+        
+        for file_info in files:
+            if isinstance(file_info, dict) and 'name' in file_info:
+                filename = file_info['name']
+                if season_pattern.search(filename):
+                    episode_count += 1
+        
+        # If we have multiple episodes, consider it a season
+        if episode_count > 1:
+            return True, episode_count
+            
+    except (json.JSONDecodeError, TypeError):
+        pass
+    
+    return False, 0
+
+def is_video_content(name, files_json=None):
+    """Check if content is video-related (file or folder with video files)."""
+    # First check if it's a season from files
+    is_season, episode_count = is_season_from_files(files_json)
+    if is_season:
+        return True
+    
+    # Check if single file has video extension
     video_extensions = {
         '.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v',
         '.mpg', '.mpeg', '.3gp', '.3g2', '.asf', '.rm', '.rmvb', '.vob',
         '.ts', '.mts', '.m2ts', '.divx', '.xvid', '.f4v', '.ogv'
     }
-    return Path(filename).suffix.lower() in video_extensions
+    
+    if Path(name).suffix.lower() in video_extensions:
+        return True
+    
+    # If we have files JSON, check if any files are video files
+    if files_json:
+        try:
+            files = json.loads(files_json)
+            if isinstance(files, list):
+                for file_info in files:
+                    if isinstance(file_info, dict) and 'name' in file_info:
+                        filename = file_info['name']
+                        if Path(filename).suffix.lower() in video_extensions:
+                            return True
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    # Check for common video-related patterns in folder names
+    video_patterns = [
+        r'S\d{2}',  # Season pattern
+        r'\d{4}',   # Year pattern
+        r'(1080p|720p|2160p|4K)',  # Resolution patterns
+        r'(x264|x265|H\.264|H\.265)',  # Codec patterns
+        r'(BluRay|WEB-DL|WEBRip|DVDRip)',  # Source patterns
+    ]
+    
+    name_lower = name.lower()
+    for pattern in video_patterns:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return True
+    
+    return False
 
 def extract_unique_trackers_from_db():
     """Extract all unique tracker domains from the database."""
@@ -299,19 +381,20 @@ def extract_unique_trackers_from_db():
         return []
 
 def extract_unique_categories_from_db():
-    """Extract all unique categories from the database."""
+    """Extract all unique categories from the database (from entire client_searchee table)."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print("Extracting unique categories from database...")
+        print("Extracting all unique categories from database...")
         
-        # Get all categories from database
+        # Get ALL categories from database, not just filtered ones
         cursor.execute("""
             SELECT DISTINCT category
             FROM client_searchee
             WHERE category IS NOT NULL 
             AND category != ''
+            AND category != 'null'
         """)
         
         unique_categories = set()
@@ -320,10 +403,29 @@ def extract_unique_categories_from_db():
         for (category,) in category_rows:
             if category:
                 # Handle both single categories and comma-separated lists
-                categories = [cat.strip() for cat in str(category).split(',') if cat.strip()]
-                unique_categories.update(categories)
+                # Also handle semicolon separation and other common separators
+                category_str = str(category).strip()
+                
+                # Split by multiple possible separators
+                separators = [',', ';', '|', '/']
+                categories = [category_str]
+                
+                for sep in separators:
+                    new_categories = []
+                    for cat in categories:
+                        new_categories.extend([c.strip() for c in cat.split(sep) if c.strip()])
+                    categories = new_categories
+                
+                # Clean and add categories
+                for cat in categories:
+                    cleaned_cat = cat.strip()
+                    # Remove quotes and other common wrapper characters
+                    cleaned_cat = cleaned_cat.strip('\'"[]{}()')
+                    if cleaned_cat and cleaned_cat.lower() not in ['null', 'none', '']:
+                        unique_categories.add(cleaned_cat)
         
         conn.close()
+        print(f"Found {len(unique_categories)} unique categories in database: {', '.join(sorted(unique_categories))}")
         return sorted(unique_categories)
         
     except Exception as e:
@@ -427,28 +529,38 @@ def prompt_category_filter(available_categories, config):
             return valid_defaults
     
     print(f"\nFound categories: {', '.join(available_categories)}")
-    print("\nDo you want to filter by all categories? Y/N")
+    print("\nDo you want to filter by specific categories? (Y/N)")
+    print("Y = Select specific categories to show")
+    print("N = Show all categories")
     
     while True:
         choice = input().strip().upper()
         if choice == 'Y':
-            return available_categories  # Return all categories
-        elif choice == 'N':
-            print(f"\nPlease select which categories to filter by (comma-separated):")
+            print(f"\nPlease select which categories to show (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
                 selected = input().strip()
                 if not selected:
-                    return None
+                    return None  # If empty, show all
                 
                 selected_categories = [cat.strip() for cat in selected.split(',')]
-                valid_categories = [cat for cat in selected_categories if cat in available_categories]
+                valid_categories = []
+                
+                # Case-insensitive matching for user input
+                for selected_cat in selected_categories:
+                    for available_cat in available_categories:
+                        if selected_cat.lower() == available_cat.lower():
+                            valid_categories.append(available_cat)
+                            break
                 
                 if valid_categories:
                     return valid_categories
                 else:
                     print("No valid categories selected. Please try again.")
+                    print(f"Available categories: {', '.join(available_categories)}")
+        elif choice == 'N':
+            return None  # Return None to show all categories
         else:
             print("Please enter Y or N:")
 
@@ -457,34 +569,45 @@ def filter_results_by_categories(results, selected_categories):
     if not selected_categories:
         return {'all': results}
     
-    grouped_results = {}
-    
-    for category in selected_categories:
-        grouped_results[category] = []
-    
-    # Add an 'other' category for items that don't match any selected categories
-    grouped_results['other'] = []
+    # Create a single group with all matching results
+    matching_results = []
     
     for result in results:
         item_categories = result.get('categories', [])
-        matched_any = False
         
-        for category in selected_categories:
-            if category in item_categories:
-                grouped_results[category].append(result)
-                matched_any = True
-                break  # Only add to first matching category group
-        
-        if not matched_any:
-            grouped_results['other'].append(result)
+        # Check if any of the item's categories match any of the selected categories
+        for selected_cat in selected_categories:
+            for item_cat in item_categories:
+                # Case-insensitive matching and strip whitespace
+                if selected_cat.lower().strip() == item_cat.lower().strip():
+                    matching_results.append(result)
+                    break  # Break inner loop once we find a match
+            else:
+                continue  # Continue outer loop if no match found
+            break  # Break outer loop if match was found
     
-    # Remove empty groups
-    return {k: v for k, v in grouped_results.items() if v}
-
+    # If no results match selected categories, return empty dict to show nothing
+    if not matching_results:
+        print(f"No results found matching selected categories: {', '.join(selected_categories)}")
+        # Show some examples of what categories were actually found
+        example_cats = set()
+        for item in results[:10]:  # Show first 10 as examples
+            example_cats.update(item.get('categories', []))
+        if example_cats:
+            print(f"Available categories in results: {', '.join(sorted(example_cats))}")
+        return {}
+    
+    # Return matching results under a single key
+    return {'filtered': matching_results}
+    
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
-    # This function has been removed as it's no longer needed
-    return Path(filename).stem.lower()
+    # Remove file extensions and normalize
+    normalized = Path(filename).stem.lower()
+    # Remove common patterns that might cause differences
+    normalized = re.sub(r'[.\-_]', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    return normalized
 
 def analyze_missing_trackers():
     """Main function to analyze missing trackers using client_searchee table."""
@@ -507,10 +630,10 @@ def analyze_missing_trackers():
         enabled_trackers = get_enabled_trackers_from_config(config, available_trackers)
         print(f"Enabled trackers for cross-seeding: {', '.join(enabled_trackers)}")
         
-        # Get all torrents with their tracker lists, paths, and categories
+        # Get all torrents with their tracker lists, paths, categories, and files
         print("\nStep 3: Analyzing torrents and their tracker coverage...")
         cursor.execute("""
-            SELECT name, info_hash, save_path, trackers, category
+            SELECT name, info_hash, save_path, trackers, category, files
             FROM client_searchee
             WHERE save_path IS NOT NULL 
             AND save_path != ''
@@ -534,30 +657,50 @@ def analyze_missing_trackers():
         all_categories = set()  # Collect all categories found
         start_time = time.time()
         
-        # Check single episode settings
+        # Check configuration settings
         include_single_episodes = should_include_single_episodes(config)
-        print(f"Single episode handling: {'Include' if include_single_episodes else 'Exclude'}")
+        include_folders = should_include_folders(config)
+        prefer_seasons = should_prefer_seasons_over_episodes(config)
+        
+        print(f"Configuration - Single episodes: {'Include' if include_single_episodes else 'Exclude'}")
+        print(f"Configuration - Folders: {'Include' if include_folders else 'Exclude'}")
+        print(f"Configuration - Prefer seasons over episodes: {'Yes' if prefer_seasons else 'No'}")
+        
+        season_episode_groups = defaultdict(list)  # Track seasons vs episodes for same content
         
         # Process each torrent
         for i, row in enumerate(torrent_rows):
             print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
             
-            name, info_hash, save_path, trackers_json, category_data = row
+            name, info_hash, save_path, trackers_json, category_data, files_json = row
             
-            # Only process video files
-            if not is_video_file(name):
+            # Check if content is video-related (file or folder with video files)
+            if not is_video_content(name, files_json):
                 continue
+            
+            # Check if it's a season
+            is_season, episode_count = is_season_from_files(files_json)
             
             # Handle single episode filtering
             if is_single_episode(name, config) and not include_single_episodes:
+                # Skip single episodes unless configured to include them
                 continue
             
-            # Parse categories
+            # Handle folder filtering
+            if not is_season and not Path(name).suffix and not include_folders:
+                # Skip folders that aren't seasons unless configured to include folders
+                continue
+            
+            # Parse categories - IMPROVED PARSING
             item_categories = []
             if category_data:
                 # Handle both single categories and comma-separated lists
-                categories = [cat.strip() for cat in str(category_data).split(',') if cat.strip()]
-                item_categories = categories
+                # Split by comma and clean up each category
+                raw_categories = str(category_data).split(',')
+                for cat in raw_categories:
+                    cleaned_cat = cat.strip()
+                    if cleaned_cat:  # Only add non-empty categories
+                        item_categories.append(cleaned_cat)
             
             # Add categories to our collection
             all_categories.update(item_categories)
@@ -582,17 +725,32 @@ def analyze_missing_trackers():
                 found_relevant_trackers = sorted(found_trackers & set(relevant_trackers))
                 
                 if missing_trackers or found_relevant_trackers:
-                    # Simplified grouping without complex normalization
-                    normalized_name = normalize_content_name(name)
-                    content_groups[normalized_name].append({
+                    # Create item data
+                    item_data = {
                         'name': name,
                         'info_hash': info_hash,
                         'path': save_path,
                         'missing_trackers': missing_trackers,
                         'found_trackers': found_relevant_trackers,
-                        'normalized_name': normalized_name,
-                        'categories': item_categories
-                    })
+                        'categories': item_categories,  # This should now be properly parsed
+                        'is_season': is_season,
+                        'episode_count': episode_count,
+                        'files_json': files_json
+                    }
+                    
+                    # Handle season vs episode preference
+                    if prefer_seasons and is_season:
+                        # This is a season - add to season/episode groups for later processing
+                        normalized_name = normalize_content_name(name)
+                        season_episode_groups[normalized_name].append(item_data)
+                    elif prefer_seasons and is_single_episode(name, config):
+                        # This is a single episode - add to season/episode groups for later processing
+                        normalized_name = normalize_content_name(name)
+                        season_episode_groups[normalized_name].append(item_data)
+                    else:
+                        # Regular content or preference disabled - add to content groups
+                        normalized_name = normalize_content_name(name)
+                        content_groups[normalized_name].append(item_data)
                     
             except json.JSONDecodeError:
                 # Skip torrents with invalid JSON
@@ -600,8 +758,46 @@ def analyze_missing_trackers():
         
         print()  # New line after progress bar
         
+        # Process season/episode groups first if preference is enabled
+        if prefer_seasons:
+            print("Step 4: Processing season/episode preferences...")
+            for normalized_name, items in season_episode_groups.items():
+                # Separate seasons from episodes
+                seasons = [item for item in items if item['is_season']]
+                episodes = [item for item in items if not item['is_season']]
+                
+                if seasons:
+                    # Prefer seasons over individual episodes
+                    # Merge all found trackers from episodes into seasons
+                    for season in seasons:
+                        merged_found_trackers = set(season['found_trackers'])
+                        merged_categories = set(season['categories'])
+                        
+                        # Add trackers and categories from episodes
+                        for episode in episodes:
+                            merged_found_trackers.update(episode['found_trackers'])
+                            merged_categories.update(episode['categories'])
+                        
+                        # Update season with merged data
+                        relevant_trackers = filter_relevant_trackers(enabled_trackers, season['name'], enabled_trackers)
+                        missing_trackers = sorted(set(relevant_trackers) - merged_found_trackers)
+                        
+                        season['missing_trackers'] = missing_trackers
+                        season['found_trackers'] = sorted(merged_found_trackers & set(relevant_trackers))
+                        season['categories'] = sorted(merged_categories)
+                        
+                        # Add info about episodes being consolidated
+                        if episodes:
+                            season['consolidated_episodes'] = [ep['name'] for ep in episodes]
+                        
+                        # Add to content groups
+                        content_groups[normalized_name].append(season)
+                else:
+                    # No seasons found, add episodes to content groups
+                    content_groups[normalized_name].extend(episodes)
+        
         # Process content groups and handle duplicates
-        print("Step 4: Processing content groups and handling duplicates...")
+        print("Step 5: Processing content groups and handling duplicates...")
         processed_content = set()
         
         for normalized_name, items in content_groups.items():
@@ -660,17 +856,29 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     with open(filename, 'w') as f:
         if not clean_output:
             f.write(f"# Cross-Pollinator: Generated {datetime.now()}\n")
-            f.write(f"# Total files needing upload: {len(results)}\n\n")
+            f.write(f"# Total files/folders needing upload: {len(results)}\n\n")
         
         for i, item in enumerate(sorted(results, key=lambda x: x['name'].lower())):
             print_progress_bar(i + 1, len(results), start_time, "Writing commands")
             
             if not clean_output:
                 f.write(f"# {item['name']}\n")
+                
+                # Show if it's a season with episode count
+                if item.get('is_season') and item.get('episode_count'):
+                    f.write(f"# Season with {item['episode_count']} episodes\n")
+                
+                # Always show consolidated episodes and duplicates in file output
+                if item.get('consolidated_episodes'):
+                    f.write(f"# Consolidated episodes: {', '.join(item['consolidated_episodes'])}\n")
+                
                 if item.get('duplicates'):
                     f.write(f"# Duplicates: {', '.join(item['duplicates'])}\n")
+                
+                # Show categories
                 if item.get('categories'):
                     f.write(f"# Categories: {', '.join(item['categories'])}\n")
+                
                 f.write(f"# Missing from: {', '.join(item['missing_trackers']) if item['missing_trackers'] else 'None'}\n")
                 f.write(f"# Found on: {', '.join(item['found_trackers']) if item['found_trackers'] else 'None'}\n")
             
@@ -766,6 +974,8 @@ def show_config_info(config):
     if config.has_section('FILTERING'):
         include_episodes = config['FILTERING'].getboolean('include_single_episodes', fallback=False)
         exclude_episodes = config['FILTERING'].getboolean('exclude_single_episodes', fallback=True)
+        include_folders = config['FILTERING'].getboolean('include_folders', fallback=True)
+        prefer_seasons = config['FILTERING'].getboolean('prefer_seasons_over_episodes', fallback=True)
         patterns = config['FILTERING'].get('single_episode_patterns', 'S\\d{2}E\\d{2},EP?\\d+,Episode\\s*\\d+')
         
         if exclude_episodes:
@@ -775,6 +985,8 @@ def show_config_info(config):
         else:
             print(f"Single episodes: Default behavior")
         
+        print(f"Include folders: {'Yes' if include_folders else 'No'}")
+        print(f"Prefer seasons over episodes: {'Yes' if prefer_seasons else 'No'}")
         print(f"Episode patterns: {patterns}")
     
     if config.has_section('GENERAL'):
@@ -789,18 +1001,39 @@ def show_config_info(config):
     print(f"\nConfig file location: {CONFIG_FILE}")
     print("Edit the config file to change these settings.\n")
 
+class Colors:
+    """ANSI color codes for terminal output."""
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+    
+    @classmethod
+    def disable(cls):
+        """Disable colors (for clean output or non-terminal environments)."""
+        cls.GREEN = cls.YELLOW = cls.RED = cls.BLUE = cls.CYAN = cls.WHITE = cls.BOLD = cls.END = ''
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Cross-Pollinator: Analyze missing torrents using cross-seed database"
+        description="Cross-Pollinator: Analyze missing torrents using cross-seed database (with folder support)"
     )
     parser.add_argument('--run', action='store_true', help='Run analysis and show missing torrents')
     parser.add_argument('--output', nargs='?', const='default', help='Generate upload commands file (optional filename)')
-    parser.add_argument('--output-clean', action='store_true', help='Generate clean output with only upload commands')
+    parser.add_argument('--clean', action='store_true', help='Generate clean output with only upload commands (no colors, no comments)')
     parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
     parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
+    parser.add_argument('--verbose', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
     
     args = parser.parse_args()
+    
+    # Disable colors for clean output
+    if args.clean:
+        Colors.disable()
     
     if args.show_config:
         # Load config without available trackers for display
@@ -824,48 +1057,91 @@ def main():
             return
         print()
     
-    print("Analyzing cross-seed database for missing torrents...")
+    print("Analyzing cross-seed database for missing torrents (including folders/seasons)...")
     results, all_categories = analyze_missing_trackers()
+    
+    # Get ALL categories from database for filtering options (not just from results)
+    all_db_categories = extract_unique_categories_from_db()
     
     if not results:
         print("No torrents found needing upload to additional trackers")
         return
     
-    print(f"Found {len(results)} video files needing upload to additional trackers")
+    print(f"Found {len(results)} video files/folders needing upload to additional trackers")
     
     # Handle category filtering unless --no-filter is specified
     selected_categories = None
     grouped_results = {'all': results}
     
-    if not args.no_filter and all_categories:
+    if not args.no_filter and all_db_categories:
         # Load config for category filtering
         config = load_config()
-        selected_categories = prompt_category_filter(all_categories, config)
+        # Use all database categories for filtering options, not just result categories
+        selected_categories = prompt_category_filter(all_db_categories, config)
         if selected_categories:
             grouped_results = filter_results_by_categories(results, selected_categories)
+            
+            # If filtering resulted in empty groups, show message and exit
+            if not grouped_results:
+                print("No matching results to display.")
+                return
     
     # Display results unless clean output requested
-    if not args.output_clean:
-        print("\nMissing Video Files by Tracker:")
+    if not args.clean:
+        print(f"\n{Colors.BOLD}Missing Video Content by Tracker:{Colors.END}")
         print("=" * 80)
         
+        # Show filtering info if categories were selected
+        if selected_categories:
+            print(f"{Colors.CYAN}Filtering by categories: {', '.join(selected_categories)}{Colors.END}")
+            total_filtered = sum(len(group) for group in grouped_results.values())
+            print(f"{Colors.WHITE}Showing {total_filtered} of {len(results)} total results{Colors.END}")
+        
         for group_name, group_results in grouped_results.items():
-            if len(grouped_results) > 1:  # Only show group headers if we have multiple groups
-                print(f"\n{'='*20} {group_name.upper()} CONTENT {'='*20}")
-                print(f"Found {len(group_results)} items in this category\n")
+            if selected_categories:  # Show filtering info when filtering was applied
+                print(f"\n{Colors.CYAN}{'='*20} FILTERED RESULTS {'='*20}{Colors.END}")
+                print(f"{Colors.WHITE}Found {len(group_results)} items matching selected categories{Colors.END}\n")
             
             for item in sorted(group_results, key=lambda x: x['name'].lower()):
-                print(f"\n{item['name']}")
-                if item.get('duplicates'):
-                    print(f"   Duplicates detected: {', '.join(item['duplicates'])}")
-                print(f"   Path: {item['path']}")
-                if item.get('categories'):
-                    print(f"   Categories: {', '.join(item['categories'])}")
-                print(f"   Missing from: {', '.join(item['missing_trackers']) if item['missing_trackers'] else 'None'}")
-                if item['found_trackers']:
-                    print(f"   Found on: {', '.join(item['found_trackers'])}")
+                # Torrent name in green
+                print(f"\n{Colors.GREEN}{Colors.BOLD}{item['name']}{Colors.END}")
+                
+                # Show season information
+                if item.get('is_season') and item.get('episode_count'):
+                    print(f"   {Colors.WHITE}Type: Season ({item['episode_count']} episodes){Colors.END}")
+                elif item.get('is_season'):
+                    print(f"   {Colors.WHITE}Type: Season{Colors.END}")
+                elif Path(item['name']).suffix:
+                    print(f"   {Colors.WHITE}Type: Single file{Colors.END}")
                 else:
-                    print(f"   Found on: None")
+                    print(f"   {Colors.WHITE}Type: Folder{Colors.END}")
+                
+                # Verbose output only information
+                if args.verbose:
+                    # Show consolidated episodes
+                    if item.get('consolidated_episodes'):
+                        print(f"   {Colors.BLUE}Consolidated episodes: {', '.join(item['consolidated_episodes'])}{Colors.END}")
+                    
+                    # Show duplicates
+                    if item.get('duplicates'):
+                        print(f"   {Colors.BLUE}Duplicates detected: {', '.join(item['duplicates'])}{Colors.END}")
+                
+                print(f"   {Colors.WHITE}Path: {item['path']}{Colors.END}")
+                
+                if item.get('categories'):
+                    print(f"   {Colors.WHITE}Categories: {', '.join(item['categories'])}{Colors.END}")
+                    
+                # Missing trackers in red
+                if item['missing_trackers']:
+                    print(f"   {Colors.RED}Missing from: {', '.join(item['missing_trackers'])}{Colors.END}")
+                else:
+                    print(f"   {Colors.WHITE}Missing from: None{Colors.END}")
+                
+                # Found trackers in yellow
+                if item['found_trackers']:
+                    print(f"   {Colors.YELLOW}Found on: {', '.join(item['found_trackers'])}{Colors.END}")
+                else:
+                    print(f"   {Colors.WHITE}Found on: None{Colors.END}")
     
     # Generate upload commands if requested
     if args.output is not None:
@@ -875,14 +1151,14 @@ def main():
             all_filtered_results.extend(group_results)
         
         output_file = args.output if args.output != 'default' else None
-        commands_file = generate_upload_commands(all_filtered_results, output_file, args.output_clean)
-        if not args.output_clean:
+        commands_file = generate_upload_commands(all_filtered_results, output_file, args.clean)
+        if not args.clean:
             print(f"\nUpload commands written to: {commands_file}")
             print("Review the file before executing upload commands")
-    elif not args.output_clean:
+    elif not args.clean:
         print("\nUse --output to generate upload commands file")
     
-    if not args.output_clean:
+    if not args.clean:
         print("\nAnalysis complete!")
 
 if __name__ == "__main__":
