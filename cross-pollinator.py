@@ -505,7 +505,7 @@ def parse_categories(category_data):
 
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
-    normalized = Path(filename).stem.lower()
+    normalized = (Path(filename).stem + Path(filename).suffix).lower()
     normalized = re.sub(r'[.\-_]', ' ', normalized)
     normalized = re.sub(r'\s+', ' ', normalized).strip()
     return normalized
