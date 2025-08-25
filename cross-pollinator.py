@@ -529,28 +529,38 @@ def prompt_category_filter(available_categories, config):
             return valid_defaults
     
     print(f"\nFound categories: {', '.join(available_categories)}")
-    print("\nDo you want to show all categories? Y/N")
+    print("\nDo you want to filter by specific categories? (Y/N)")
+    print("Y = Select specific categories to show")
+    print("N = Show all categories")
     
     while True:
         choice = input().strip().upper()
         if choice == 'Y':
-            return available_categories  # Return all categories
-        elif choice == 'N':
-            print(f"\nPlease select which categories to keep (comma-separated):")
+            print(f"\nPlease select which categories to show (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
                 selected = input().strip()
                 if not selected:
-                    return available_categories  # If empty, return all
+                    return None  # If empty, show all
                 
                 selected_categories = [cat.strip() for cat in selected.split(',')]
-                valid_categories = [cat for cat in selected_categories if cat in available_categories]
+                valid_categories = []
+                
+                # Case-insensitive matching for user input
+                for selected_cat in selected_categories:
+                    for available_cat in available_categories:
+                        if selected_cat.lower() == available_cat.lower():
+                            valid_categories.append(available_cat)
+                            break
                 
                 if valid_categories:
                     return valid_categories
                 else:
                     print("No valid categories selected. Please try again.")
+                    print(f"Available categories: {', '.join(available_categories)}")
+        elif choice == 'N':
+            return None  # Return None to show all categories
         else:
             print("Please enter Y or N:")
 
@@ -571,8 +581,10 @@ def filter_results_by_categories(results, selected_categories):
         item_categories = result.get('categories', [])
         matched_any = False
         
+        # Check if any of the item's categories match any of the selected categories
         for category in selected_categories:
-            if category in item_categories:
+            # Case-insensitive matching
+            if any(cat.lower() == category.lower() for cat in item_categories):
                 grouped_results[category].append(result)
                 matched_any = True
                 break  # Only add to first matching category group
@@ -581,8 +593,16 @@ def filter_results_by_categories(results, selected_categories):
             grouped_results['other'].append(result)
     
     # Remove empty groups
-    return {k: v for k, v in grouped_results.items() if v}
-
+    filtered_groups = {k: v for k, v in grouped_results.items() if v}
+    
+    # If no results match selected categories, show warning
+    if not filtered_groups or (len(filtered_groups) == 1 and 'other' in filtered_groups):
+        print(f"Warning: No results found matching selected categories: {', '.join(selected_categories)}")
+        if 'other' in filtered_groups:
+            print(f"Found {len(filtered_groups['other'])} results not matching selected categories")
+    
+    return filtered_groups
+    
 def normalize_content_name(filename):
     """Normalize content name for duplicate detection."""
     # Remove file extensions and normalize
@@ -1059,16 +1079,30 @@ def main():
         selected_categories = prompt_category_filter(all_db_categories, config)
         if selected_categories:
             grouped_results = filter_results_by_categories(results, selected_categories)
+            
+            # If filtering resulted in empty groups, fall back to showing all results
+            if not grouped_results:
+                print("No results matched the selected categories. Showing all results.")
+                grouped_results = {'all': results}
     
     # Display results unless clean output requested
     if not args.clean:
         print(f"\n{Colors.BOLD}Missing Video Content by Tracker:{Colors.END}")
         print("=" * 80)
         
+        # Show filtering info if categories were selected
+        if selected_categories:
+            print(f"{Colors.CYAN}Filtering by categories: {', '.join(selected_categories)}{Colors.END}")
+            total_filtered = sum(len(group) for group in grouped_results.values())
+            print(f"{Colors.WHITE}Showing {total_filtered} of {len(results)} total results{Colors.END}")
+        
         for group_name, group_results in grouped_results.items():
             if len(grouped_results) > 1:  # Only show group headers if we have multiple groups
                 print(f"\n{Colors.CYAN}{'='*20} {group_name.upper()} CONTENT {'='*20}{Colors.END}")
                 print(f"{Colors.WHITE}Found {len(group_results)} items in this category{Colors.END}\n")
+            elif selected_categories:  # Show category name even for single group if filtering was applied
+                print(f"\n{Colors.CYAN}{'='*20} FILTERED RESULTS {'='*20}{Colors.END}")
+                print(f"{Colors.WHITE}Found {len(group_results)} items matching selected categories{Colors.END}\n")
             
             for item in sorted(group_results, key=lambda x: x['name'].lower()):
                 # Torrent name in green
