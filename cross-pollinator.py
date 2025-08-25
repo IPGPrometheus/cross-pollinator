@@ -394,6 +394,7 @@ def extract_unique_categories_from_db():
             FROM client_searchee
             WHERE category IS NOT NULL 
             AND category != ''
+            AND category != 'null'
         """)
         
         unique_categories = set()
@@ -402,8 +403,26 @@ def extract_unique_categories_from_db():
         for (category,) in category_rows:
             if category:
                 # Handle both single categories and comma-separated lists
-                categories = [cat.strip() for cat in str(category).split(',') if cat.strip()]
-                unique_categories.update(categories)
+                # Also handle semicolon separation and other common separators
+                category_str = str(category).strip()
+                
+                # Split by multiple possible separators
+                separators = [',', ';', '|', '/']
+                categories = [category_str]
+                
+                for sep in separators:
+                    new_categories = []
+                    for cat in categories:
+                        new_categories.extend([c.strip() for c in cat.split(sep) if c.strip()])
+                    categories = new_categories
+                
+                # Clean and add categories
+                for cat in categories:
+                    cleaned_cat = cat.strip()
+                    # Remove quotes and other common wrapper characters
+                    cleaned_cat = cleaned_cat.strip('\'"[]{}()')
+                    if cleaned_cat and cleaned_cat.lower() not in ['null', 'none', '']:
+                        unique_categories.add(cleaned_cat)
         
         conn.close()
         print(f"Found {len(unique_categories)} unique categories in database: {', '.join(sorted(unique_categories))}")
@@ -517,13 +536,13 @@ def prompt_category_filter(available_categories, config):
         if choice == 'Y':
             return available_categories  # Return all categories
         elif choice == 'N':
-            print(f"\nPlease select which categories to remove from view (comma-separated):")
+            print(f"\nPlease select which categories to keep (comma-separated):")
             print(f"Available categories: {', '.join(available_categories)}")
             
             while True:
                 selected = input().strip()
                 if not selected:
-                    return None
+                    return available_categories  # If empty, return all
                 
                 selected_categories = [cat.strip() for cat in selected.split(',')]
                 valid_categories = [cat for cat in selected_categories if cat in available_categories]
@@ -983,16 +1002,16 @@ def main():
     )
     parser.add_argument('--run', action='store_true', help='Run analysis and show missing torrents')
     parser.add_argument('--output', nargs='?', const='default', help='Generate upload commands file (optional filename)')
-    parser.add_argument('--output-clean', action='store_true', help='Generate clean output with only upload commands')
+    parser.add_argument('--clean', action='store_true', help='Generate clean output with only upload commands (no colors, no comments)')
     parser.add_argument('--debug-trackers', action='store_true', help='Show detailed tracker mapping analysis')
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
     parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
-    parser.add_argument('--verbose-output', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
+    parser.add_argument('--verbose', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
     
     args = parser.parse_args()
     
-    # Disable colors for clean output or output generation
-    if args.output_clean or args.output is not None:
+    # Disable colors for clean output
+    if args.clean:
         Colors.disable()
     
     if args.show_config:
@@ -1026,8 +1045,6 @@ def main():
     if not results:
         print("No torrents found needing upload to additional trackers")
         return
-        print("No torrents found needing upload to additional trackers")
-        return
     
     print(f"Found {len(results)} video files/folders needing upload to additional trackers")
     
@@ -1044,7 +1061,7 @@ def main():
             grouped_results = filter_results_by_categories(results, selected_categories)
     
     # Display results unless clean output requested
-    if not args.output_clean:
+    if not args.clean:
         print(f"\n{Colors.BOLD}Missing Video Content by Tracker:{Colors.END}")
         print("=" * 80)
         
@@ -1068,7 +1085,7 @@ def main():
                     print(f"   {Colors.WHITE}Type: Folder{Colors.END}")
                 
                 # Verbose output only information
-                if args.verbose_output:
+                if args.verbose:
                     # Show consolidated episodes
                     if item.get('consolidated_episodes'):
                         print(f"   {Colors.BLUE}Consolidated episodes: {', '.join(item['consolidated_episodes'])}{Colors.END}")
@@ -1102,14 +1119,14 @@ def main():
             all_filtered_results.extend(group_results)
         
         output_file = args.output if args.output != 'default' else None
-        commands_file = generate_upload_commands(all_filtered_results, output_file, args.output_clean)
-        if not args.output_clean:
+        commands_file = generate_upload_commands(all_filtered_results, output_file, args.clean)
+        if not args.clean:
             print(f"\nUpload commands written to: {commands_file}")
             print("Review the file before executing upload commands")
-    elif not args.output_clean:
+    elif not args.clean:
         print("\nUse --output to generate upload commands file")
     
-    if not args.output_clean:
+    if not args.clean:
         print("\nAnalysis complete!")
 
 if __name__ == "__main__":
