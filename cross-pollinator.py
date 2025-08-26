@@ -906,7 +906,7 @@ def analyze_missing_trackers_sync():
         print(f"Error analyzing missing trackers: {e}")
         return [], []
 
-async def analyze_missing_trackers_with_args(args):
+async def analyze_missing_trackers_async(args):
     """Wrapper to handle args parameter."""
     
     # Extract what we need from args
