@@ -1267,7 +1267,8 @@ async def analyze_missing_trackers_async(args):
                 print(f"Warning: Error during banned groups filtering: {e}")
                 import traceback
                 traceback.print_exc()
-              personal_filter_enabled = get_config_bool(config, 'PERSONAL_FILTERS', 'enabled', False)
+              
+        personal_filter_enabled = get_config_bool(config, 'PERSONAL_FILTERS', 'enabled', False)
         
         if personal_filter_enabled and results:
             print(f"\nStep 7: Applying personal filters...")
