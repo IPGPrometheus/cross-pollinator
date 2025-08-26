@@ -4,3 +4,4 @@ requests
 click
 rich
 python-dotenv
+httpx
