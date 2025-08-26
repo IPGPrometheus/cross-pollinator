@@ -16,6 +16,8 @@ from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+from bannedgroups import filter_torrents_by_banned_groups, extract_release_group
+import asyncio
 import re
 import time
 
@@ -206,7 +208,16 @@ def create_default_config(available_trackers=None):
         'single_episode_patterns': r'S\d{2}E\d{2},EP?\d+,Episode\s*\d+,\d{4}[.\-]\d{2}[.\-]\d{2}',
         'include_folders': 'true',
         'prefer_seasons_over_episodes': 'true',
+        'filter_banned_groups': 'true',  # NEW
         'comment': '# Set include_single_episodes=true to include single episodes, false to exclude'
+    }
+    
+    config['BANNED_GROUPS'] = {  # NEW SECTION
+        'enabled': 'true',
+        'check_all_trackers': 'true',
+        'cache_duration_hours': '24',
+        'verbose_filtering': 'false',
+        'comment': '# Banned groups filtering settings'
     }
     
     config['GENERAL'] = {
@@ -241,7 +252,14 @@ def load_config(available_trackers=None):
                 'include_single_episodes': 'false', 
                 'exclude_single_episodes': 'true',
                 'include_folders': 'true',
-                'prefer_seasons_over_episodes': 'true'
+                'prefer_seasons_over_episodes': 'true',
+                'filter_banned_groups': 'true'  # NEW
+            },
+            'BANNED_GROUPS': {  # NEW SECTION
+                'enabled': 'true',
+                'check_all_trackers': 'true',
+                'cache_duration_hours': '24',
+                'verbose_filtering': 'false'
             },
             'GENERAL': {'auto_filter_categories': 'false', 'default_categories': 'Movies,TV'}
         }
@@ -251,7 +269,6 @@ def load_config(available_trackers=None):
                 config[section_name] = defaults
     
     return config
-
 
 def get_enabled_trackers_from_config(config, available_trackers):
     """Get list of enabled trackers based on configuration."""
@@ -634,7 +651,7 @@ def process_content_groups(content_groups, enabled_trackers):
     return results
 
 
-def analyze_missing_trackers():
+async def analyze_missing_trackers():
     """Main function to analyze missing trackers using client_searchee table."""
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -652,6 +669,13 @@ def analyze_missing_trackers():
         config = load_config(available_trackers)
         enabled_trackers = get_enabled_trackers_from_config(config, available_trackers)
         print(f"Enabled trackers for cross-seeding: {', '.join(enabled_trackers)}")
+        
+        # Check if banned groups filtering is enabled
+        banned_groups_enabled = get_config_bool(config, 'BANNED_GROUPS', 'enabled', True)
+        banned_groups_verbose = get_config_bool(config, 'BANNED_GROUPS', 'verbose_filtering', False)
+        
+        if banned_groups_enabled:
+            print(f"Banned groups filtering: Enabled (verbose: {banned_groups_verbose})")
         
         # Step 3: Query torrents
         print("\nStep 3: Analyzing torrents and their tracker coverage...")
@@ -716,6 +740,40 @@ def analyze_missing_trackers():
         
         results = process_content_groups(content_groups, enabled_trackers)
         
+        # NEW: Apply banned groups filtering
+        if banned_groups_enabled and results:
+            print(f"\nStep 6: Filtering banned release groups...")
+            
+            # Get base directory for banned groups data
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Create config dict in the format expected by bannedgroups module
+            banned_groups_config = {}
+            if config.has_section('TRACKERS'):
+                banned_groups_config['TRACKERS'] = dict(config['TRACKERS'])
+            
+            try:
+                # Filter results using banned groups
+                filtered_results, banned_torrents, filtering_stats = await filter_torrents_by_banned_groups(
+                    results, enabled_trackers, banned_groups_config, base_dir, banned_groups_verbose
+                )
+                
+                if filtering_stats['banned_count'] > 0:
+                    print(f"Filtered out {filtering_stats['banned_count']} torrents with banned release groups")
+                    
+                    if banned_groups_verbose:
+                        print(f"Banned groups breakdown:")
+                        for tracker, count in filtering_stats['by_tracker'].items():
+                            if count > 0:
+                                print(f"  {tracker}: {count} torrents")
+                
+                results = filtered_results
+                
+            except ImportError:
+                print("Warning: bannedgroups module not found, skipping banned groups filtering")
+            except Exception as e:
+                print(f"Warning: Error during banned groups filtering: {e}")
+        
         conn.close()
         return results, sorted(all_categories)
         
@@ -723,6 +781,232 @@ def analyze_missing_trackers():
         print(f"Error analyzing missing trackers: {e}")
         return [], []
 
+
+# ADD this NEW function after the analyze_missing_trackers() function:
+def analyze_missing_trackers_sync():
+    """Synchronous fallback version without banned groups filtering."""
+    print("Running synchronous analysis (banned groups filtering disabled)")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Step 1: Build comprehensive domain to abbreviation mapping
+        domain_to_abbrev, available_trackers = build_comprehensive_tracker_mapping()
+        
+        if not available_trackers:
+            print("No trackers found in database that match TRACKER_MAPPING")
+            return [], []
+        
+        # Step 2: Load configuration
+        print("\nStep 2: Loading configuration...")
+        config = load_config(available_trackers)
+        enabled_trackers = get_enabled_trackers_from_config(config, available_trackers)
+        print(f"Enabled trackers for cross-seeding: {', '.join(enabled_trackers)}")
+        print("Note: Banned groups filtering disabled in sync mode")
+        
+        # Step 3: Query torrents
+        print("\nStep 3: Analyzing torrents and their tracker coverage...")
+        cursor.execute("""
+            SELECT name, info_hash, save_path, trackers, category, files
+            FROM client_searchee
+            WHERE save_path IS NOT NULL 
+            AND save_path != ''
+            AND trackers IS NOT NULL
+            AND trackers != ''
+            AND trackers != '[]'
+            ORDER BY name
+        """)
+        
+        torrent_rows = cursor.fetchall()
+        total_torrents = len(torrent_rows)
+        
+        if total_torrents == 0:
+            print("No torrents with paths and trackers found")
+            return [], []
+        
+        print(f"Found {total_torrents} torrents to analyze")
+        
+        # Display configuration
+        include_single_episodes = get_config_bool(config, 'FILTERING', 'include_single_episodes')
+        include_folders = get_config_bool(config, 'FILTERING', 'include_folders', True)
+        prefer_seasons = get_config_bool(config, 'FILTERING', 'prefer_seasons_over_episodes', True)
+        
+        print(f"Configuration - Single episodes: {'Include' if include_single_episodes else 'Exclude'}")
+        print(f"Configuration - Folders: {'Include' if include_folders else 'Exclude'}")
+        print(f"Configuration - Prefer seasons over episodes: {'Yes' if prefer_seasons else 'No'}")
+        
+        # Process torrents (same as async version but without banned groups filtering)
+        content_groups = defaultdict(list)
+        season_episode_groups = defaultdict(list) if prefer_seasons else None
+        all_categories = set()
+        start_time = time.time()
+        
+        for i, row in enumerate(torrent_rows):
+            print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
+            
+            item_data = create_torrent_item(row, domain_to_abbrev, enabled_trackers, config)
+            if not item_data:
+                continue
+            
+            # Collect categories
+            all_categories.update(item_data['categories'])
+            
+            # Group items based on preference
+            normalized_name = normalize_content_name(item_data['name'])
+            
+            if prefer_seasons and (item_data['is_season'] or is_single_episode(item_data['name'], config)):
+                season_episode_groups[normalized_name].append(item_data)
+            else:
+                content_groups[normalized_name].append(item_data)
+        
+        print()  # New line after progress bar
+        
+        # Process groups
+        if prefer_seasons and season_episode_groups:
+            process_season_episode_preferences(season_episode_groups, content_groups, enabled_trackers)
+        
+        results = process_content_groups(content_groups, enabled_trackers)
+        
+        conn.close()
+        return results, sorted(all_categories)
+        
+    except Exception as e:
+        print(f"Error analyzing missing trackers: {e}")
+        return [], []
+
+async def analyze_missing_trackers_async(args):
+    """Async wrapper for analyze_missing_trackers with banned groups filtering."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Step 1: Build comprehensive domain to abbreviation mapping
+        domain_to_abbrev, available_trackers = build_comprehensive_tracker_mapping()
+        
+        if not available_trackers:
+            print("No trackers found in database that match TRACKER_MAPPING")
+            return [], []
+        
+        # Step 2: Load configuration
+        print("\nStep 2: Loading configuration...")
+        config = load_config(available_trackers)
+        enabled_trackers = get_enabled_trackers_from_config(config, available_trackers)
+        print(f"Enabled trackers for cross-seeding: {', '.join(enabled_trackers)}")
+        
+        # Check if banned groups filtering is enabled
+        banned_groups_enabled = (
+            get_config_bool(config, 'BANNED_GROUPS', 'enabled', True) and 
+            not args.no_banned_filter
+        )
+        banned_groups_verbose = get_config_bool(config, 'BANNED_GROUPS', 'verbose_filtering', False)
+        
+        if banned_groups_enabled:
+            print(f"Banned groups filtering: Enabled (verbose: {banned_groups_verbose})")
+        elif args.no_banned_filter:
+            print("Banned groups filtering: Disabled by --no-banned-filter")
+        
+        # Step 3: Query torrents (same as before)
+        print("\nStep 3: Analyzing torrents and their tracker coverage...")
+        cursor.execute("""
+            SELECT name, info_hash, save_path, trackers, category, files
+            FROM client_searchee
+            WHERE save_path IS NOT NULL 
+            AND save_path != ''
+            AND trackers IS NOT NULL
+            AND trackers != ''
+            AND trackers != '[]'
+            ORDER BY name
+        """)
+        
+        torrent_rows = cursor.fetchall()
+        total_torrents = len(torrent_rows)
+        
+        if total_torrents == 0:
+            print("No torrents with paths and trackers found")
+            return [], []
+        
+        print(f"Found {total_torrents} torrents to analyze")
+        
+        # Display configuration
+        include_single_episodes = get_config_bool(config, 'FILTERING', 'include_single_episodes')
+        include_folders = get_config_bool(config, 'FILTERING', 'include_folders', True)
+        prefer_seasons = get_config_bool(config, 'FILTERING', 'prefer_seasons_over_episodes', True)
+        
+        print(f"Configuration - Single episodes: {'Include' if include_single_episodes else 'Exclude'}")
+        print(f"Configuration - Folders: {'Include' if include_folders else 'Exclude'}")
+        print(f"Configuration - Prefer seasons over episodes: {'Yes' if prefer_seasons else 'No'}")
+        
+        # Process torrents (same as before)
+        content_groups = defaultdict(list)
+        season_episode_groups = defaultdict(list) if prefer_seasons else None
+        all_categories = set()
+        start_time = time.time()
+        
+        for i, row in enumerate(torrent_rows):
+            print_progress_bar(i + 1, total_torrents, start_time, "Processing torrents")
+            
+            item_data = create_torrent_item(row, domain_to_abbrev, enabled_trackers, config)
+            if not item_data:
+                continue
+            
+            all_categories.update(item_data['categories'])
+            normalized_name = normalize_content_name(item_data['name'])
+            
+            if prefer_seasons and (item_data['is_season'] or is_single_episode(item_data['name'], config)):
+                season_episode_groups[normalized_name].append(item_data)
+            else:
+                content_groups[normalized_name].append(item_data)
+        
+        print()  # New line after progress bar
+        
+        # Process groups (same as before)
+        if prefer_seasons and season_episode_groups:
+            process_season_episode_preferences(season_episode_groups, content_groups, enabled_trackers)
+        
+        results = process_content_groups(content_groups, enabled_trackers)
+        
+        # NEW: Apply banned groups filtering
+        if banned_groups_enabled and results:
+            print(f"\nStep 6: Filtering banned release groups...")
+            
+            # Get base directory for banned groups data
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Create config dict in the format expected by bannedgroups module
+            banned_groups_config = {}
+            if config.has_section('TRACKERS'):
+                banned_groups_config['TRACKERS'] = dict(config['TRACKERS'])
+            
+            try:
+                from bannedgroups import filter_torrents_by_banned_groups
+                
+                # Filter results using banned groups
+                filtered_results, banned_torrents, filtering_stats = await filter_torrents_by_banned_groups(
+                    results, enabled_trackers, banned_groups_config, base_dir, banned_groups_verbose
+                )
+                
+                if filtering_stats['banned_count'] > 0:
+                    print(f"Filtered out {filtering_stats['banned_count']} torrents with banned release groups")
+                    
+                    if banned_groups_verbose:
+                        print(f"Banned groups breakdown:")
+                        for tracker, count in filtering_stats['by_tracker'].items():
+                            if count > 0:
+                                print(f"  {tracker}: {count} torrents")
+                
+                results = filtered_results
+                
+            except ImportError:
+                print("Warning: bannedgroups module not found, skipping banned groups filtering")
+            except Exception as e:
+                print(f"Warning: Error during banned groups filtering: {e}")
+        
+        conn.close()
+        return results, sorted(all_categories)
+        
+    except Exception as e:
+        print(f"Error analyzing missing trackers: {e}")
+        return [], []
 
 def prompt_category_filter(available_categories, config):
     """Prompt user to select which categories to filter by."""
@@ -939,6 +1223,7 @@ def show_config_info(config):
         exclude_episodes = get_config_bool(config, 'FILTERING', 'exclude_single_episodes', True)
         include_folders = get_config_bool(config, 'FILTERING', 'include_folders', True)
         prefer_seasons = get_config_bool(config, 'FILTERING', 'prefer_seasons_over_episodes', True)
+        filter_banned = get_config_bool(config, 'FILTERING', 'filter_banned_groups', True)  # NEW
         patterns = config['FILTERING'].get('single_episode_patterns', r'S\d{2}E\d{2},EP?\d+,Episode\s*\d+')
         
         if exclude_episodes:
@@ -950,7 +1235,21 @@ def show_config_info(config):
         
         print(f"Include folders: {'Yes' if include_folders else 'No'}")
         print(f"Prefer seasons over episodes: {'Yes' if prefer_seasons else 'No'}")
+        print(f"Filter banned groups: {'Yes' if filter_banned else 'No'}")  # NEW
         print(f"Episode patterns: {patterns}")
+    
+    # NEW: Display banned groups configuration
+    if config.has_section('BANNED_GROUPS'):
+        enabled = get_config_bool(config, 'BANNED_GROUPS', 'enabled', True)
+        check_all = get_config_bool(config, 'BANNED_GROUPS', 'check_all_trackers', True)
+        cache_hours = config['BANNED_GROUPS'].get('cache_duration_hours', '24')
+        verbose = get_config_bool(config, 'BANNED_GROUPS', 'verbose_filtering', False)
+        
+        print(f"\nBanned Groups Settings:")
+        print(f"Filtering enabled: {'Yes' if enabled else 'No'}")
+        print(f"Check all trackers: {'Yes' if check_all else 'No'}")
+        print(f"Cache duration: {cache_hours} hours")
+        print(f"Verbose output: {'Yes' if verbose else 'No'}")
     
     if config.has_section('GENERAL'):
         auto_filter = get_config_bool(config, 'GENERAL', 'auto_filter_categories')
@@ -963,7 +1262,6 @@ def show_config_info(config):
     
     print(f"\nConfig file location: {CONFIG_FILE}")
     print("Edit the config file to change these settings.\n")
-
 
 def display_results(grouped_results, selected_categories, total_results, args):
     """Display analysis results with proper formatting."""
@@ -1019,7 +1317,6 @@ def display_results(grouped_results, selected_categories, total_results, args):
             else:
                 print(f"   {Colors.WHITE}Found on: None{Colors.END}")
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Cross-Pollinator: Analyze missing torrents using cross-seed database (with folder support)"
@@ -1031,8 +1328,21 @@ def main():
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
     parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
     parser.add_argument('--verbose', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
+    parser.add_argument('--no-banned-filter', action='store_true', help='Skip banned groups filtering even if enabled in config')  # NEW
+    parser.add_argument('--test-release-group', type=str, help='Test release group extraction on a torrent name')  # NEW
+    parser.add_argument('--sync', action='store_true', help='Force synchronous mode (disables banned groups filtering)')  # NEW
     
     args = parser.parse_args()
+    
+    # NEW: Test release group extraction
+    if args.test_release_group:
+        try:
+            group = extract_release_group(args.test_release_group)
+            print(f"Torrent name: {args.test_release_group}")
+            print(f"Extracted group: {group if group else 'None detected'}")
+        except ImportError:
+            print("Error: bannedgroups module not found")
+        return
     
     # Disable colors for clean output
     if args.clean:
@@ -1060,7 +1370,18 @@ def main():
         print()
     
     print("Analyzing cross-seed database for missing torrents (including folders/seasons)...")
-    results, all_categories = analyze_missing_trackers()
+    
+    # NEW: Handle async vs sync execution
+    if args.sync:
+        print("Running in synchronous mode (banned groups filtering disabled)")
+        results, all_categories = analyze_missing_trackers_sync()
+    else:
+        try:
+            # Try async first (with banned groups filtering)
+            results, all_categories = asyncio.run(analyze_missing_trackers())
+        except Exception as e:
+            print(f"Async analysis failed ({e}), falling back to synchronous mode")
+            results, all_categories = analyze_missing_trackers_sync()
     
     # Get all categories from database for filtering options
     all_db_categories = extract_unique_categories_from_db()
@@ -1108,4 +1429,5 @@ def main():
 
 
 if __name__ == "__main__":
+    main()
     main()
