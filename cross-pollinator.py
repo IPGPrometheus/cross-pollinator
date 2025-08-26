@@ -314,6 +314,38 @@ def get_config_bool(config, section, key, default=False):
     """Get boolean value from config with fallback."""
     return config[section].getboolean(key, fallback=default)
 
+def fix_config_parsing(config):
+    """
+    Fix configuration parsing for banned groups.
+    Properly parse API key configurations from the config file.
+    """
+    banned_groups_config = {'TRACKERS': {}}
+    
+    if config.has_section('TRACKERS'):
+        for key, value in config['TRACKERS'].items():
+            # Skip non-API entries
+            if key in ['enabled_trackers', 'disabled_trackers', 'comment']:
+                continue
+            
+            # Handle different config formats
+            key_upper = key.upper()
+            
+            # If the value looks like JSON, parse it
+            if value.strip().startswith('{'):
+                try:
+                    parsed_config = json.loads(value)
+                    banned_groups_config['TRACKERS'][key_upper] = parsed_config
+                    print(f"Loaded API config for {key_upper}")
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Could not parse JSON config for {key}: {e}")
+                    continue
+            # Handle simple api_key format
+            elif value.strip() and not value.startswith('#'):
+                # Assume it's a direct API key
+                banned_groups_config['TRACKERS'][key_upper] = {'api_key': value.strip()}
+                print(f"Loaded direct API key for {key_upper}")
+    
+    return banned_groups_config
 
 def is_season_from_files(files_json):
     """Check if the torrent represents a season based on files structure."""
@@ -1002,26 +1034,14 @@ async def analyze_missing_trackers_async(args):
         results = process_content_groups(content_groups, enabled_trackers)
         
         # FIXED: Apply banned groups filtering with proper config parsing
+        # FIXED: Apply banned groups filtering with proper config parsing
         if banned_groups_enabled and results:
             print(f"\nStep 6: Filtering banned release groups...")
             
             base_dir = os.path.dirname(os.path.abspath(__file__))
             
-            # FIX: Properly parse the configuration
-            banned_groups_config = {'TRACKERS': {}}
-            
-            if config.has_section('TRACKERS'):
-                for tracker, json_str in config['TRACKERS'].items():
-                    # Skip non-JSON entries (like enabled_trackers, disabled_trackers, comment)
-                    if not json_str.startswith('{'):
-                        continue
-                        
-                    try:
-                        banned_groups_config['TRACKERS'][tracker] = json.loads(json_str)
-                        print(f"Parsed {tracker} API config successfully")
-                    except json.JSONDecodeError as e:
-                        print(f"Warning: Could not parse {tracker} config: {e}")
-                        continue
+            # FIX: Use the proper config parsing function
+            banned_groups_config = fix_config_parsing(config)
             
             # Debug: Show what we're passing to the banned groups filter
             if banned_groups_verbose:
@@ -1054,7 +1074,7 @@ async def analyze_missing_trackers_async(args):
                         for group, count in sorted_groups[:5]:  # Top 5
                             print(f"    {group}: {count} torrents")
                 
-                # Actually update the results - this was missing!
+                # Update results with filtered data
                 results = filtered_results
                 
                 if banned_groups_verbose and banned_torrents:
