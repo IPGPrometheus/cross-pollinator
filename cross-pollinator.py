@@ -200,6 +200,11 @@ def create_default_config(available_trackers=None):
         'enabled_trackers': default_trackers,
         'disabled_trackers': '',
         'comment': '# Comma-separated list of tracker abbreviations to include/exclude'
+        
+        # Add API keys for trackers that support banned groups
+        AITHER = {"api_key": "your_aither_api_key_here"}
+        LST = {"api_key": "your_lst_api_key_here"}
+
     }
     
     config['FILTERING'] = {
