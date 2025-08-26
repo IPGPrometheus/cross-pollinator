@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir \
     requests \
     click \
     rich \
+    httpx \
     python-dotenv
 
 # Create app directory structure
