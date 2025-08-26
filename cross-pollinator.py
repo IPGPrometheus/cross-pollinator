@@ -906,8 +906,12 @@ def analyze_missing_trackers_sync():
         print(f"Error analyzing missing trackers: {e}")
         return [], []
 
-async def analyze_missing_trackers_async(args):
-    """Async wrapper for analyze_missing_trackers with banned groups filtering."""
+async def analyze_missing_trackers_with_args(args):
+    """Wrapper to handle args parameter."""
+    
+    # Extract what we need from args
+    no_banned_filter = getattr(args, 'no_banned_filter', False)
+    
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -928,13 +932,13 @@ async def analyze_missing_trackers_async(args):
         # Check if banned groups filtering is enabled
         banned_groups_enabled = (
             get_config_bool(config, 'BANNED_GROUPS', 'enabled', True) and 
-            not args.no_banned_filter
+            not no_banned_filter
         )
         banned_groups_verbose = get_config_bool(config, 'BANNED_GROUPS', 'verbose_filtering', False)
         
         if banned_groups_enabled:
             print(f"Banned groups filtering: Enabled (verbose: {banned_groups_verbose})")
-        elif args.no_banned_filter:
+        elif no_banned_filter:
             print("Banned groups filtering: Disabled by --no-banned-filter")
         
         # Step 3: Query torrents (same as before)
@@ -997,17 +1001,33 @@ async def analyze_missing_trackers_async(args):
         
         results = process_content_groups(content_groups, enabled_trackers)
         
-        # NEW: Apply banned groups filtering
+        # FIXED: Apply banned groups filtering with proper config parsing
         if banned_groups_enabled and results:
             print(f"\nStep 6: Filtering banned release groups...")
             
-            # Get base directory for banned groups data
             base_dir = os.path.dirname(os.path.abspath(__file__))
             
-            # Create config dict in the format expected by bannedgroups module
-            banned_groups_config = {}
+            # FIX: Properly parse the configuration
+            banned_groups_config = {'TRACKERS': {}}
+            
             if config.has_section('TRACKERS'):
-                banned_groups_config['TRACKERS'] = dict(config['TRACKERS'])
+                for tracker, json_str in config['TRACKERS'].items():
+                    # Skip non-JSON entries (like enabled_trackers, disabled_trackers, comment)
+                    if not json_str.startswith('{'):
+                        continue
+                        
+                    try:
+                        banned_groups_config['TRACKERS'][tracker] = json.loads(json_str)
+                        print(f"Parsed {tracker} API config successfully")
+                    except json.JSONDecodeError as e:
+                        print(f"Warning: Could not parse {tracker} config: {e}")
+                        continue
+            
+            # Debug: Show what we're passing to the banned groups filter
+            if banned_groups_verbose:
+                print(f"Debug: Checking {len(results)} torrents against {len(enabled_trackers)} trackers")
+                print(f"Debug: Trackers to check: {enabled_trackers}")
+                print(f"Debug: Config has API keys for: {list(banned_groups_config.get('TRACKERS', {}).keys())}")
             
             try:
                 from bannedgroups import filter_torrents_by_banned_groups
@@ -1017,27 +1037,47 @@ async def analyze_missing_trackers_async(args):
                     results, enabled_trackers, banned_groups_config, base_dir, banned_groups_verbose
                 )
                 
-                if filtering_stats['banned_count'] > 0:
-                    print(f"Filtered out {filtering_stats['banned_count']} torrents with banned release groups")
-                    
-                    if banned_groups_verbose:
-                        print(f"Banned groups breakdown:")
-                        for tracker, count in filtering_stats['by_tracker'].items():
-                            if count > 0:
-                                print(f"  {tracker}: {count} torrents")
+                print(f"Filtering results:")
+                print(f"  Original torrents: {filtering_stats['total_checked']}")
+                print(f"  Passed filtering: {filtering_stats['passed_count']}")
+                print(f"  Filtered out (banned): {filtering_stats['banned_count']}")
                 
+                if filtering_stats['banned_count'] > 0:
+                    print(f"  Banned groups breakdown:")
+                    for tracker, count in filtering_stats['by_tracker'].items():
+                        if count > 0:
+                            print(f"    {tracker}: {count} torrents")
+                    
+                    if filtering_stats['by_group']:
+                        print(f"  Most common banned groups:")
+                        sorted_groups = sorted(filtering_stats['by_group'].items(), key=lambda x: x[1], reverse=True)
+                        for group, count in sorted_groups[:5]:  # Top 5
+                            print(f"    {group}: {count} torrents")
+                
+                # Actually update the results - this was missing!
                 results = filtered_results
+                
+                if banned_groups_verbose and banned_torrents:
+                    print(f"\nDetailed banned torrents:")
+                    for torrent in banned_torrents[:10]:  # Show first 10
+                        print(f"  - {torrent['name']}")
+                        for info in torrent.get('banned_info', []):
+                            print(f"    └─ {info['reason']}")
                 
             except ImportError:
                 print("Warning: bannedgroups module not found, skipping banned groups filtering")
             except Exception as e:
                 print(f"Warning: Error during banned groups filtering: {e}")
+                import traceback
+                traceback.print_exc()
         
         conn.close()
         return results, sorted(all_categories)
         
     except Exception as e:
         print(f"Error analyzing missing trackers: {e}")
+        import traceback
+        traceback.print_exc()
         return [], []
 
 def prompt_category_filter(available_categories, config):
@@ -1456,12 +1496,9 @@ def main():
     parser.add_argument('--no-filter', action='store_true', help='Skip category filtering prompt and show all results')
     parser.add_argument('--show-config', action='store_true', help='Display current configuration settings')
     parser.add_argument('--verbose', action='store_true', help='Show detailed output including duplicates and consolidated episodes')
-    parser.add_argument('--no-banned-filter', action='store_true', help='Skip banned groups filtering even if enabled in config')  # NEW
-    parser.add_argument('--test-release-group', type=str, help='Test release group extraction on a torrent name') 
-    parser.add_argument('--sync', action='store_true', help='Force synchronous mode (disables banned groups filtering)')  
-    parser.add_argument('--test-banned-filter', type=str, help='Test banned groups filtering on a specific torrent name')
-    parser.add_argument('--debug-banned-groups', action='store_true', help='Run comprehensive banned groups debugging')
-    parser.add_argument('--show-banned-config', action='store_true', help='Show banned groups configuration')
+    parser.add_argument('--no-banned-filter', action='store_true', help='Skip banned groups filtering even if enabled in config')
+    parser.add_argument('--test-release-group', type=str, help='Test release group extraction on a torrent name')
+    parser.add_argument('--sync', action='store_true', help='Force synchronous mode (disables banned groups filtering)')
     
     args = parser.parse_args()
     
@@ -1475,21 +1512,7 @@ def main():
             print("Error: bannedgroups module not found")
         return
     
-    if args.test_banned_filter:
-        config = load_config()
-        enabled_trackers = get_enabled_trackers_from_config(config, extract_unique_trackers_from_db())
-        test_individual_torrent_filtering(args.test_banned_filter, enabled_trackers)
-        return
-    
-    if args.debug_banned_groups:
-        asyncio.run(debug_banned_groups_comprehensive())
-        return
-    
-    if args.show_banned_config:
-        show_banned_groups_config()
-        return  
-    
-  # Disable colors for clean output
+    # Disable colors for clean output
     if args.clean:
         Colors.disable()
     
@@ -1516,14 +1539,14 @@ def main():
     
     print("Analyzing cross-seed database for missing torrents (including folders/seasons)...")
     
-    # NEW: Handle async vs sync execution
+    # FIXED: Handle async vs sync execution - pass args to the functions
     if args.sync:
         print("Running in synchronous mode (banned groups filtering disabled)")
-        results, all_categories = analyze_missing_trackers_sync()
+        results, all_categories = analyze_missing_trackers_sync()  # This one is OK, doesn't need args
     else:
         try:
-            # Try async first (with banned groups filtering)
-            results, all_categories = asyncio.run(analyze_missing_trackers())
+            # FIXED: Pass args to the async function
+            results, all_categories = asyncio.run(analyze_missing_trackers_async(args))
         except Exception as e:
             print(f"Async analysis failed ({e}), falling back to synchronous mode")
             results, all_categories = analyze_missing_trackers_sync()
