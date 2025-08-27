@@ -594,28 +594,31 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
             display_personal_filter_results(personal_filter_results, verbose)
         
         # Apply banned groups filtering
+        # Apply banned groups filtering
         if banned_groups_enabled and results:
             print("Filtering banned release groups...")
             
-        # Debug: Check release group extraction for TAoE
-        # Debug banned groups filtering
-        # Debug banned groups filtering
-        banned_groups = ['TAoE']  # Replace with your actual banned groups list
-        for result in results:
-            if "TAoE" in result['name']:
-                extracted_group = extract_release_group(result['name'])
-                print(f"DEBUG: Extracted group: '{extracted_group}'")
-                print(f"DEBUG: Banned groups: {banned_groups}")
-                
-                if extracted_group:  # Check if extracted_group is not None
-                    print(f"DEBUG: Is '{extracted_group}' in banned list: {extracted_group in banned_groups}")
-                    print(f"DEBUG: Case-insensitive check: {extracted_group.lower() in [g.lower() for g in banned_groups]}")
+            # Debug banned groups filtering
+            banned_groups = ['TAoE']  # Replace with your actual banned groups list
+            for result in results:
+                if "TAoE" in result['name']:
+                    extracted_group = extract_release_group(result['name'])
+                    print(f"DEBUG: Extracted group: '{extracted_group}'")
+                    print(f"DEBUG: Banned groups: {banned_groups}")
                     
-                    # Check if this torrent should be filtered
-                    should_filter = extracted_group in banned_groups
-                    print(f"DEBUG: Should filter this torrent: {should_filter}")
-                else:
-                    print(f"DEBUG: No release group extracted - torrent will not be filtered")
+                    if extracted_group:  # Check if extracted_group is not None
+                        print(f"DEBUG: Is '{extracted_group}' in banned list: {extracted_group in banned_groups}")
+                        print(f"DEBUG: Case-insensitive check: {extracted_group.lower() in [g.lower() for g in banned_groups]}")
+                        
+                        # Check if this torrent should be filtered
+                        should_filter = extracted_group in banned_groups
+                        print(f"DEBUG: Should filter this torrent: {should_filter}")
+                    else:
+                        print(f"DEBUG: No release group extracted - torrent will not be filtered")
+            
+            # Move the config parsing and filtering inside this block
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            banned_groups_config = fix_config_parsing(config)
             
             try:
                 filtered_results, banned_torrents, filtering_stats = await filter_torrents_by_banned_groups(
