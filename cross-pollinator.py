@@ -598,32 +598,19 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
             print("Filtering banned release groups...")
             
         # Debug: Check release group extraction for TAoE
+        # Debug banned groups filtering
+        banned_groups = ['TAoE']  # Replace with your actual banned groups list
         for result in results:
             if "TAoE" in result['name']:
-                # Test the function that's actually being called
                 extracted_group = extract_release_group(result['name'])
-                print(f"DEBUG: '{result['name']}' -> extracted group: '{extracted_group}'")
+                print(f"DEBUG: Extracted group: '{extracted_group}'")
+                print(f"DEBUG: Banned groups: {banned_groups}")
+                print(f"DEBUG: Is '{extracted_group}' in banned list: {extracted_group in banned_groups}")
+                print(f"DEBUG: Case-insensitive check: {extracted_group.lower() in [g.lower() for g in banned_groups]}")
                 
-                # Test manual pattern matching
-                import re
-                from pathlib import Path
-                name = Path(result['name']).stem
-                print(f"DEBUG: Name after stem: '{name}'")
-                
-                patterns = [
-                    r'\[([^\]]+)\]$',
-                    r'\[([^\]]+)\]',
-                    r'-([A-Za-z0-9]+)$',
-                    r'\(([^)]+)\)$',
-                ]
-                
-                for i, pattern in enumerate(patterns):
-                    matches = re.findall(pattern, name, re.IGNORECASE)
-                    if matches:
-                        print(f"DEBUG: Pattern {i+1} '{pattern}' matched: '{matches[0]}'")
-                        break
-                else:
-                    print("DEBUG: No patterns matched")
+                # Check if this torrent should be filtered
+                should_filter = extracted_group in banned_groups
+                print(f"DEBUG: Should filter this torrent: {should_filter}")
             
             base_dir = os.path.dirname(os.path.abspath(__file__))
             banned_groups_config = fix_config_parsing(config)
