@@ -658,10 +658,112 @@ def generate_upload_commands(results, output_file=None, clean_output=False):
     print(f"Commands written to: {filename}")
     return filename
 
-def display_results(results, verbose=False):
+def extract_unique_categories_from_db():
+    """Extract all unique categories from database."""
+    category_data = extract_unique_items_from_db('category')
+    unique_categories = set()
+    
+    for category in category_data:
+        if not category:
+            continue
+            
+        category_str = str(category).strip()
+        
+        # Split by common separators
+        separators = [',', ';', '|', '/']
+        categories = [category_str]
+        
+        for sep in separators:
+            new_categories = []
+            for cat in categories:
+                new_categories.extend([c.strip() for c in cat.split(sep) if c.strip()])
+            categories = new_categories
+        
+        # Clean categories
+        for cat in categories:
+            cleaned_cat = cat.strip().strip('\'"[]{}()')
+            if cleaned_cat and cleaned_cat.lower() not in ['null', 'none', '']:
+                unique_categories.add(cleaned_cat)
+    
+    return sorted(unique_categories)
+
+def prompt_category_filter(available_categories, config):
+    """Prompt user to select categories to filter by."""
+    if not available_categories:
+        return None
+    
+    # Check auto-filtering
+    if get_config_bool(config, 'GENERAL', 'auto_filter_categories'):
+        default_cats = config['GENERAL'].get('default_categories', 'Movies,TV').split(',')
+        default_cats = [cat.strip() for cat in default_cats if cat.strip()]
+        valid_defaults = [cat for cat in default_cats if cat in available_categories]
+        if valid_defaults:
+            print(f"Auto-filtering enabled. Using: {', '.join(valid_defaults)}")
+            return valid_defaults
+    
+    print(f"\nFound categories: {', '.join(available_categories)}")
+    print("\nFilter by specific categories? (Y/N)")
+    print("Y = Select categories to show")
+    print("N = Show all categories")
+    
+    while True:
+        choice = input().strip().upper()
+        if choice == 'Y':
+            print(f"\nSelect categories (comma-separated):")
+            print(f"Available: {', '.join(available_categories)}")
+            
+            while True:
+                selected = input().strip()
+                if not selected:
+                    return None
+                
+                selected_categories = [cat.strip() for cat in selected.split(',')]
+                valid_categories = []
+                
+                # Case-insensitive matching
+                for selected_cat in selected_categories:
+                    for available_cat in available_categories:
+                        if selected_cat.lower() == available_cat.lower():
+                            valid_categories.append(available_cat)
+                            break
+                
+                if valid_categories:
+                    return valid_categories
+                else:
+                    print("No valid categories. Try again.")
+        elif choice == 'N':
+            return None
+        else:
+            print("Please enter Y or N:")
+
+def filter_results_by_categories(results, selected_categories):
+    """Filter results by selected categories."""
+    if not selected_categories:
+        return results
+    
+    matching_results = []
+    
+    for result in results:
+        item_categories = result.get('categories', [])
+        
+        # Check if any item category matches selected categories
+        for selected_cat in selected_categories:
+            if any(selected_cat.lower().strip() == item_cat.lower().strip() 
+                   for item_cat in item_categories):
+                matching_results.append(result)
+                break
+    
+    return matching_results
+
+def display_results(results, verbose=False, selected_categories=None, total_results=0):
     """Display analysis results."""
     print(f"\n{Colors.BOLD}Missing Torrents by Tracker:{Colors.END}")
     print("=" * 60)
+    
+    # Show filtering info
+    if selected_categories:
+        print(f"{Colors.CYAN}Filtered by: {', '.join(selected_categories)}{Colors.END}")
+        print(f"{Colors.WHITE}Showing {len(results)} of {total_results} total results{Colors.END}\n")
     
     for item in sorted(results, key=lambda x: x['name'].lower()):
         print(f"\n{Colors.GREEN}{Colors.BOLD}{item['name']}{Colors.END}")
@@ -678,6 +780,9 @@ def display_results(results, verbose=False):
             print(f"   {Colors.BLUE}Duplicates: {', '.join(item['duplicates'])}{Colors.END}")
         
         print(f"   Path: {item['path']}")
+        
+        if item.get('categories'):
+            print(f"   Categories: {', '.join(item['categories'])}")
         
         if item['missing_trackers']:
             print(f"   {Colors.RED}Missing: {', '.join(item['missing_trackers'])}{Colors.END}")
@@ -863,9 +968,27 @@ def main():
     
     print(f"Found {len(results)} torrents needing upload")
     
+    # Handle category filtering (unless --rm-filters is used)
+    selected_categories = None
+    total_results = len(results)
+    
+    if not args.rm_filters:
+        try:
+            all_categories = extract_unique_categories_from_db()
+            if all_categories:
+                config = load_config()
+                selected_categories = prompt_category_filter(all_categories, config)
+                if selected_categories:
+                    results = filter_results_by_categories(results, selected_categories)
+                    if not results:
+                        print("No results match selected categories")
+                        return
+        except Exception as e:
+            print(f"Category filtering failed: {e}")
+    
     # Display results unless clean output
     if not args.clean:
-        display_results(results, args.verbose)
+        display_results(results, args.verbose, selected_categories, total_results)
     
     # Generate commands if requested
     if args.output is not None:
