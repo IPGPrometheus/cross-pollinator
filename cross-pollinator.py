@@ -587,8 +587,6 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
         
         results = process_content_groups(content_groups, enabled_trackers)
         
-        results = process_content_groups(content_groups, enabled_trackers)
-        
         # Apply personal filters first
         if results:
             print("Applying personal filters...")
@@ -598,6 +596,12 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
         # Apply banned groups filtering
         if banned_groups_enabled and results:
             print("Filtering banned release groups...")
+            
+            # Debug: Check release group extraction for TAoE
+            for result in results:
+                if "TAoE" in result['name']:
+                    extracted_group = extract_release_group(result['name'])
+                    print(f"DEBUG: '{result['name']}' -> extracted group: '{extracted_group}'")
             
             base_dir = os.path.dirname(os.path.abspath(__file__))
             banned_groups_config = fix_config_parsing(config)
