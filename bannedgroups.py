@@ -390,33 +390,38 @@ async def filter_torrents_by_banned_groups(torrents, enabled_trackers, config, b
     return await checker.filter_banned_torrents(torrents, enabled_trackers, verbose)
 
 def extract_release_group(name):
-    """Extract release group from torrent name"""
+    """Extract release group from torrent name, working from the end"""
     if not name:
         return None
     
-    # Don't use Path().stem as it incorrectly treats parts of torrent names as extensions
-    # Just use the name as-is
     torrent_name = name.strip()
     
-    # Common patterns for release groups
+    # Work from the end - most reliable patterns first
     patterns = [
-        r'\[([^\]]+)\]$',           # [GroupName] at end
-        r'-([^-\s]+)$',             # -GroupName at end  
-        r'~\s*([^~\s]+)$',          # ~ GroupName at end
-        r'\(([^)]+)\)$',            # (GroupName) at end
-        r'\{([^}]+)\}$',            # {GroupName} at end
+        # [GroupName] at the very end
+        r'\[([^\]]+)\]$',
+        # (GroupName) at the very end  
+        r'\(([^)]+)\)$',
+        # {GroupName} at the very end
+        r'\{([^}]+)\}$',
+        # -GroupName at the very end (after last space/dash)
+        r'[\s\-]([A-Za-z0-9]+)$',
+        # ~GroupName or ~ GroupName at the very end
+        r'~\s*([A-Za-z0-9]+)$',
     ]
     
     for pattern in patterns:
         match = re.search(pattern, torrent_name)
         if match:
             group = match.group(1).strip()
-            # Filter out common non-group patterns
-            if not re.match(r'^\d+$', group) and len(group) > 1:
+            # Basic filtering - exclude obvious non-groups
+            if (len(group) > 1 and 
+                not group.isdigit() and 
+                group.lower() not in ['repack', 'proper', 'internal', 'limited']):
                 return group
     
     return None
-
+    
 # Example usage and testing
 async def test_banned_groups_checker():
     """Test function to demonstrate usage."""
