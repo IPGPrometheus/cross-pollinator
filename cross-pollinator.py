@@ -587,6 +587,14 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
         
         results = process_content_groups(content_groups, enabled_trackers)
         
+        results = process_content_groups(content_groups, enabled_trackers)
+        
+        # Apply personal filters first
+        if results:
+            print("Applying personal filters...")
+            results, personal_filter_results = apply_personal_filters(results, config)
+            display_personal_filter_results(personal_filter_results, verbose)
+        
         # Apply banned groups filtering
         if banned_groups_enabled and results:
             print("Filtering banned release groups...")
