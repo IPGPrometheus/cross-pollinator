@@ -218,6 +218,8 @@ def create_default_config(available_trackers=None):
         'audio_exclude': '',
         'channels_include': '',
         'channels_exclude': '2.0',
+        'special_flags_include': '',
+        'special_flags_exclude': '',
         'filter_mode': 'exclude',
         'case_sensitive': 'false'
     }
@@ -762,6 +764,10 @@ def apply_personal_filters(results, config):
         'channels': {
             'include': [c.strip() for c in config['PERSONAL_FILTERS'].get('channels_include', '').split(',') if c.strip()],
             'exclude': [c.strip() for c in config['PERSONAL_FILTERS'].get('channels_exclude', '').split(',') if c.strip()]
+        },
+        'special_flags': {
+            'include': [s.strip() for s in config['PERSONAL_FILTERS'].get('special_flags_include', '').split(',') if s.strip()],
+            'exclude': [s.strip() for s in config['PERSONAL_FILTERS'].get('special_flags_exclude', '').split(',') if s.strip()]
         }
     }
     
@@ -950,7 +956,7 @@ def show_config_info(config):
             print(f"Default mode: {filter_mode}")
             
             # Show active filters
-            filter_types = ['format', 'resolution', 'audio', 'channels']
+            filter_types = ['format', 'resolution', 'audio', 'channels', 'special_flags']
             for filter_type in filter_types:
                 include_key = f'{filter_type}_include'
                 exclude_key = f'{filter_type}_exclude'
@@ -958,7 +964,7 @@ def show_config_info(config):
                 exclude_val = config['PERSONAL_FILTERS'].get(exclude_key, '').strip()
                 
                 if include_val or exclude_val:
-                    print(f"  {filter_type.title()}:")
+                    print(f"  {filter_type.replace('_', ' ').title()}:")
                     if include_val:
                         print(f"    Include: {include_val}")
                     if exclude_val:
