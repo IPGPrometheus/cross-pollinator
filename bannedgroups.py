@@ -23,9 +23,7 @@ class BannedGroupsChecker:
         self.banned_groups_cache = {}
         
     def extract_release_group_from_name(self, torrent_name):
-    """
-    Extract release group from torrent name, working from the end.
-    """
+    """Extract release group from torrent name, working from the end."""
     if not torrent_name:
         return None
         
