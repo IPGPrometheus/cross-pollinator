@@ -389,11 +389,33 @@ async def filter_torrents_by_banned_groups(torrents, enabled_trackers, config, b
     checker = BannedGroupsChecker(config, base_dir)
     return await checker.filter_banned_torrents(torrents, enabled_trackers, verbose)
 
-def extract_release_group(torrent_name):
-    """Standalone function to extract release group from torrent name."""
-    checker = BannedGroupsChecker({}, "")
-    return checker.extract_release_group_from_name(torrent_name)
-
+def extract_release_group(name):
+    """Extract release group from torrent name"""
+    if not name:
+        return None
+    
+    # Don't use Path().stem as it incorrectly treats parts of torrent names as extensions
+    # Just use the name as-is
+    torrent_name = name.strip()
+    
+    # Common patterns for release groups
+    patterns = [
+        r'\[([^\]]+)\]$',           # [GroupName] at end
+        r'-([^-\s]+)$',             # -GroupName at end  
+        r'~\s*([^~\s]+)$',          # ~ GroupName at end
+        r'\(([^)]+)\)$',            # (GroupName) at end
+        r'\{([^}]+)\}$',            # {GroupName} at end
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, torrent_name)
+        if match:
+            group = match.group(1).strip()
+            # Filter out common non-group patterns
+            if not re.match(r'^\d+$', group) and len(group) > 1:
+                return group
+    
+    return None
 
 # Example usage and testing
 async def test_banned_groups_checker():
