@@ -1140,60 +1140,6 @@ def main():
                         return
         except Exception as e:
             print(f"Category filtering failed: {e}")
-          
-    if banned_groups_enabled and results:
-            print("Filtering banned release groups...")
-            
-            # Debug release group extraction (only if --debug-groups is enabled)
-            if args.debug_groups:
-                print("\nDEBUG: Release group extraction for sample torrents:")
-                print("-" * 50)
-                sample_count = 0
-                for result in results:
-                    if sample_count >= 10:  # Limit to first 10 for debugging
-                        break
-                    extracted_group = extract_release_group(result['name'])
-                    print(f"'{result['name']}' -> Group: '{extracted_group}'")
-                    sample_count += 1
-                print("-" * 50)
-            
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            banned_groups_config = fix_config_parsing(config)
-            
-            try:
-                filtered_results, banned_torrents, filtering_stats = await filter_torrents_by_banned_groups(
-                    results, enabled_trackers, banned_groups_config, base_dir, args.debug_groups
-                )
-                
-                print(f"Filtered: {filtering_stats['passed_count']}/{filtering_stats['total_checked']} torrents")
-                
-                if filtering_stats['banned_count'] > 0 and (verbose or args.debug_groups):
-                    print(f"Banned groups breakdown:")
-                    for tracker, count in filtering_stats['by_tracker'].items():
-                        if count > 0:
-                            print(f"  {tracker}: {count} torrents")
-                
-                # Show detailed debug info if requested
-                if args.debug_groups and banned_torrents:
-                    print(f"\nDEBUG: Banned torrents details:")
-                    print("-" * 50)
-                    for torrent in banned_torrents[:5]:  # Show first 5 banned torrents
-                        print(f"BANNED: {torrent['name']}")
-                        if 'banned_info' in torrent:
-                            for info in torrent['banned_info']:
-                                print(f"  └─ {info['reason']}")
-                    if len(banned_torrents) > 5:
-                        print(f"... and {len(banned_torrents) - 5} more")
-                    print("-" * 50)
-                
-                results = filtered_results
-                
-            except Exception as e:
-                print(f"Warning: Banned groups filtering failed: {e}")
-                if args.debug_groups:
-                    import traceback
-                    print("Full error traceback:")
-                    traceback.print_exc()
                   
     # Display results unless clean output
     if not args.clean:
