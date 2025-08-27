@@ -23,43 +23,40 @@ class BannedGroupsChecker:
         self.banned_groups_cache = {}
         
     def extract_release_group_from_name(self, torrent_name):
-        """
-        Extract release group from torrent name using common patterns.
-        Looks for groups in brackets, after dashes, or at the end of filename.
-        """
-        if not torrent_name:
-            return None
-            
-        # Remove file extension
-        name = Path(torrent_name).stem
-        
-        # Common release group patterns (in order of preference)
-        patterns = [
-            # Groups in square brackets at the end: [GroupName]
-            r'\[([^\]]+)\]$',
-            # Groups in square brackets anywhere: [GroupName]
-            r'\[([^\]]+)\]',
-            # Groups after dash at end: -GroupName
-            r'-([A-Za-z0-9]+)$',
-            # Groups in parentheses at end: (GroupName)
-            r'\(([^)]+)\)$',
-            # Groups after last dot (before extension): .GroupName
-            r'\.([A-Za-z0-9]+)$',
-            # Groups with common prefixes
-            r'(?:^|[\.\-\s])([A-Za-z0-9]{2,15})(?:[\.\-\s]|$)',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, name, re.IGNORECASE)
-            if matches:
-                # Return the first/best match, cleaned up
-                group = matches[0].strip()
-                # Filter out obvious non-groups (years, resolutions, etc.)
-                if not self._is_likely_release_group(group):
-                    continue
-                return group
-                
+    """
+    Extract release group from torrent name, working from the end.
+    """
+    if not torrent_name:
         return None
+        
+    # Don't use Path().stem - work with full torrent name
+    name = torrent_name.strip()
+    
+    # Work from the end - most reliable patterns first
+    patterns = [
+        # [GroupName] at the very end
+        r'\[([^\]]+)\]$',
+        # (GroupName) at the very end  
+        r'\(([^)]+)\)$',
+        # {GroupName} at the very end
+        r'\{([^}]+)\}$',
+        # -GroupName at the very end (after last space/dash)
+        r'[\s\-]([A-Za-z0-9]+)$',
+        # ~GroupName or ~ GroupName at the very end
+        r'~\s*([A-Za-z0-9]+)$',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            group = match.group(1).strip()
+            # Basic filtering - exclude obvious non-groups
+            if (len(group) > 1 and 
+                not group.isdigit() and 
+                group.lower() not in ['repack', 'proper', 'internal', 'limited']):
+                return group
+    
+    return None
     
     def _is_likely_release_group(self, candidate):
         """
