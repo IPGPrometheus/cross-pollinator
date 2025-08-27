@@ -736,6 +736,119 @@ def prompt_category_filter(available_categories, config):
         else:
             print("Please enter Y or N:")
 
+def apply_personal_filters(results, config):
+    """Apply personal filters based on format, resolution, audio, etc."""
+    
+    if not get_config_bool(config, 'PERSONAL_FILTERS', 'enabled', False):
+        return results, {}
+    
+    case_sensitive = get_config_bool(config, 'PERSONAL_FILTERS', 'case_sensitive', False)
+    filter_mode = config['PERSONAL_FILTERS'].get('filter_mode', 'exclude').lower()
+    
+    # Get filter criteria
+    filters = {
+        'format': {
+            'include': [f.strip() for f in config['PERSONAL_FILTERS'].get('format_include', '').split(',') if f.strip()],
+            'exclude': [f.strip() for f in config['PERSONAL_FILTERS'].get('format_exclude', '').split(',') if f.strip()]
+        },
+        'resolution': {
+            'include': [r.strip() for r in config['PERSONAL_FILTERS'].get('resolution_include', '').split(',') if r.strip()],
+            'exclude': [r.strip() for r in config['PERSONAL_FILTERS'].get('resolution_exclude', '').split(',') if r.strip()]
+        },
+        'audio': {
+            'include': [a.strip() for a in config['PERSONAL_FILTERS'].get('audio_include', '').split(',') if a.strip()],
+            'exclude': [a.strip() for a in config['PERSONAL_FILTERS'].get('audio_exclude', '').split(',') if a.strip()]
+        },
+        'channels': {
+            'include': [c.strip() for c in config['PERSONAL_FILTERS'].get('channels_include', '').split(',') if c.strip()],
+            'exclude': [c.strip() for c in config['PERSONAL_FILTERS'].get('channels_exclude', '').split(',') if c.strip()]
+        }
+    }
+    
+    def normalize_text(text):
+        return text if case_sensitive else text.lower()
+    
+    def check_criteria_in_name(name, criteria_list):
+        """Check if any criteria appears in the name."""
+        name_normalized = normalize_text(name)
+        for criteria in criteria_list:
+            criteria_normalized = normalize_text(criteria)
+            # Check different patterns
+            patterns = [
+                criteria_normalized,
+                f".{criteria_normalized}.",
+                f"-{criteria_normalized}.",
+                f".{criteria_normalized}-",
+                f"[{criteria_normalized}]",
+                f"({criteria_normalized})",
+            ]
+            
+            for pattern in patterns:
+                if pattern in name_normalized:
+                    return True
+        return False
+    
+    def should_include_torrent(torrent_name):
+        """Determine if torrent should be included."""
+        for filter_type, filter_data in filters.items():
+            include_list = filter_data['include']
+            exclude_list = filter_data['exclude']
+            
+            # Include list - torrent MUST match at least one
+            if include_list:
+                if not check_criteria_in_name(torrent_name, include_list):
+                    return False, f"Missing required {filter_type}: {', '.join(include_list)}"
+            
+            # Exclude list - torrent MUST NOT match any
+            if exclude_list:
+                if check_criteria_in_name(torrent_name, exclude_list):
+                    for excluded in exclude_list:
+                        if check_criteria_in_name(torrent_name, [excluded]):
+                            return False, f"Contains excluded {filter_type}: {excluded}"
+        
+        return True, None
+    
+    # Apply filters
+    filtered_results = []
+    stats = {
+        'total_checked': len(results),
+        'passed_count': 0,
+        'filtered_count': 0,
+        'filter_reasons': {}
+    }
+    
+    for result in results:
+        torrent_name = result.get('name', '')
+        should_include, reason = should_include_torrent(torrent_name)
+        
+        if should_include:
+            filtered_results.append(result)
+            stats['passed_count'] += 1
+        else:
+            stats['filtered_count'] += 1
+            if reason not in stats['filter_reasons']:
+                stats['filter_reasons'][reason] = 0
+            stats['filter_reasons'][reason] += 1
+    
+    return filtered_results, {'stats': stats}
+
+def display_personal_filter_results(filter_results, verbose=False):
+    """Display personal filtering results."""
+    if not filter_results or 'stats' not in filter_results:
+        return
+    
+    stats = filter_results['stats']
+    
+    print(f"\nPersonal Filtering Results:")
+    print(f"  Total torrents: {stats['total_checked']}")
+    print(f"  Passed filters: {stats['passed_count']}")
+    print(f"  Filtered out: {stats['filtered_count']}")
+    
+    if stats['filter_reasons'] and verbose:
+        print(f"  Filter breakdown:")
+        for reason, count in sorted(stats['filter_reasons'].items()):
+            print(f"    {reason}: {count} torrents")
+
 def filter_results_by_categories(results, selected_categories):
     """Filter results by selected categories."""
     if not selected_categories:
@@ -823,6 +936,33 @@ def show_config_info(config):
         
         print(f"Banned groups enabled: {'Yes' if enabled else 'No'}")
         print(f"Verbose filtering: {'Yes' if verbose else 'No'}")
+    
+    if config.has_section('PERSONAL_FILTERS'):
+        enabled = get_config_bool(config, 'PERSONAL_FILTERS', 'enabled', False)
+        case_sensitive = get_config_bool(config, 'PERSONAL_FILTERS', 'case_sensitive', False)
+        filter_mode = config['PERSONAL_FILTERS'].get('filter_mode', 'exclude')
+        
+        print(f"\nPersonal Filters:")
+        print(f"Enabled: {'Yes' if enabled else 'No'}")
+        
+        if enabled:
+            print(f"Case sensitive: {'Yes' if case_sensitive else 'No'}")
+            print(f"Default mode: {filter_mode}")
+            
+            # Show active filters
+            filter_types = ['format', 'resolution', 'audio', 'channels']
+            for filter_type in filter_types:
+                include_key = f'{filter_type}_include'
+                exclude_key = f'{filter_type}_exclude'
+                include_val = config['PERSONAL_FILTERS'].get(include_key, '').strip()
+                exclude_val = config['PERSONAL_FILTERS'].get(exclude_key, '').strip()
+                
+                if include_val or exclude_val:
+                    print(f"  {filter_type.title()}:")
+                    if include_val:
+                        print(f"    Include: {include_val}")
+                    if exclude_val:
+                        print(f"    Exclude: {exclude_val}")
     
     print(f"\nConfig file: {CONFIG_FILE}")
 
