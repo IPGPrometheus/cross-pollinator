@@ -597,11 +597,33 @@ async def analyze_missing_trackers(no_banned_filter=False, verbose=False):
         if banned_groups_enabled and results:
             print("Filtering banned release groups...")
             
-            # Debug: Check release group extraction for TAoE
-            for result in results:
-                if "TAoE" in result['name']:
-                    extracted_group = extract_release_group(result['name'])
-                    print(f"DEBUG: '{result['name']}' -> extracted group: '{extracted_group}'")
+        # Debug: Check release group extraction for TAoE
+        for result in results:
+            if "TAoE" in result['name']:
+                # Test the function that's actually being called
+                extracted_group = extract_release_group(result['name'])
+                print(f"DEBUG: '{result['name']}' -> extracted group: '{extracted_group}'")
+                
+                # Test manual pattern matching
+                import re
+                from pathlib import Path
+                name = Path(result['name']).stem
+                print(f"DEBUG: Name after stem: '{name}'")
+                
+                patterns = [
+                    r'\[([^\]]+)\]$',
+                    r'\[([^\]]+)\]',
+                    r'-([A-Za-z0-9]+)$',
+                    r'\(([^)]+)\)$',
+                ]
+                
+                for i, pattern in enumerate(patterns):
+                    matches = re.findall(pattern, name, re.IGNORECASE)
+                    if matches:
+                        print(f"DEBUG: Pattern {i+1} '{pattern}' matched: '{matches[0]}'")
+                        break
+                else:
+                    print("DEBUG: No patterns matched")
             
             base_dir = os.path.dirname(os.path.abspath(__file__))
             banned_groups_config = fix_config_parsing(config)
